@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>人情账本 · 扫码安装</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, #e74c3c 0%, #ff6b5a 30%, #f5f5f5 30%, #f5f5f5 100%);
+  min-height: 100vh;
+  color: #2c3e50;
+  -webkit-font-smoothing: antialiased;
+}
+.container {
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100vh;
+  text-align: center;
+}
+
+/* 头部 */
+.hero {
+  color: #fff;
+  padding: 40px 24px 30px;
+}
+.hero .app-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  margin: 0 auto 12px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.4rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+}
+.hero h1 { font-size: 1.4rem; font-weight: 700; }
+.hero .subtitle { font-size: 0.8rem; opacity: 0.85; margin-top: 4px; }
+
+/* 二维码区 */
+.qr-section {
+  background: #fff;
+  margin: 0 24px;
+  border-radius: 20px;
+  padding: 28px 20px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}
+.qr-title { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.qr-desc { font-size: 0.76rem; color: #7f8c8d; margin-bottom: 20px; }
+#qrcode {
+  display: inline-block;
+  padding: 16px;
+  border: 2px solid #f0f0f0;
+  border-radius: 12px;
+  background: #fff;
+}
+#qrcode img, #qrcode canvas { display: block; }
+.qr-hint {
+  font-size: 0.72rem;
+  color: #bdc3c7;
+  margin-top: 14px;
+}
+
+/* 直接打开按钮 */
+.open-section {
+  padding: 24px;
+}
+.btn-direct {
+  display: block;
+  width: 100%;
+  background: linear-gradient(135deg, #e74c3c 0%, #ff6b5a 100%);
+  color: #fff;
+  text-decoration: none;
+  padding: 16px;
+  border-radius: 14px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(231,76,60,0.35);
+}
+.btn-direct:active { transform: scale(0.97); }
+.btn-secondary {
+  display: block;
+  width: 100%;
+  background: #fff;
+  color: #e74c3c;
+  text-decoration: none;
+  padding: 14px;
+  border-radius: 14px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border: 2px solid #e74c3c;
+  margin-top: 10px;
+  cursor: pointer;
+}
+.btn-secondary:active { background: #fdf0ee; }
+
+/* 微信内引导 */
+.wechat-tip {
+  display: none;
+  background: #fff3e0;
+  border: 1px solid #ffe0b2;
+  border-radius: 12px;
+  padding: 14px;
+  margin: 0 24px 16px;
+  text-align: left;
+}
+.wechat-tip.show { display: block; }
+.wechat-tip .wt-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e65100;
+  margin-bottom: 6px;
+}
+.wechat-tip .wt-step {
+  font-size: 0.76rem;
+  color: #5d4037;
+  line-height: 1.8;
+  padding-left: 18px;
+  position: relative;
+}
+.wechat-tip .wt-step b { color: #e65100; }
+.wechat-arrow {
+  position: fixed;
+  top: 10px;
+  right: 20px;
+  font-size: 2rem;
+  color: #fff;
+  display: none;
+  z-index: 999;
+}
+.wechat-arrow.show { display: block; animation: bounce 1s infinite; }
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* 功能简介 */
+.features {
+  padding: 0 24px 30px;
+}
+.features h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 12px; }
+.feature-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+.feature-item {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px 6px;
+  font-size: 0.72rem;
+}
+.feature-item .fi-icon { font-size: 1.4rem; }
+.feature-item .fi-text { margin-top: 4px; color: #7f8c8d; }
+
+.footer {
+  text-align: center;
+  padding: 10px 20px 30px;
+  font-size: 0.72rem;
+  color: #bdc3c7;
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- 头部 -->
+  <div class="hero">
+    <div class="app-icon">🧧</div>
+    <h1>人情账本</h1>
+    <p class="subtitle">人情往来记账 · 家庭共享</p>
+  </div>
+
+  <!-- 微信内引导箭头 -->
+  <div class="wechat-arrow" id="wechatArrow">👆</div>
+
+  <!-- 微信内提示 -->
+  <div class="wechat-tip" id="wechatTip">
+    <div class="wt-title">📋 在微信里请按以下操作：</div>
+    <div class="wt-step">1. 点击右上角 <b>···</b> 三个点</div>
+    <div class="wt-step">2. 选择 <b>「在 Safari 中打开」</b>或<b>「在浏览器打开」</b></div>
+    <div class="wt-step">3. 在浏览器中按下方步骤安装</div>
+  </div>
+
+  <!-- 二维码区 -->
+  <div class="qr-section">
+    <div class="qr-title">📱 扫码安装到手机</div>
+    <div class="qr-desc">用手机相机扫一扫，或截图后识别二维码</div>
+    <div id="qrcode"></div>
+    <div class="qr-hint">扫码后用浏览器打开 → 添加到主屏幕</div>
+  </div>
+
+  <!-- 直接打开 -->
+  <div class="open-section">
+    <button class="btn-direct" onclick="goInstall()">🚀 直接安装（点我）</button>
+    <button class="btn-secondary" onclick="goApp()">先打开用用看</button>
+  </div>
+
+  <!-- 功能 -->
+  <div class="features">
+    <h3>✨ 核心功能</h3>
+    <div class="feature-list">
+      <div class="feature-item">
+        <div class="fi-icon">✏️</div>
+        <div class="fi-text">记一笔</div>
+      </div>
+      <div class="feature-item">
+        <div class="fi-icon">📑</div>
+        <div class="fi-text">批量记礼金</div>
+      </div>
+      <div class="feature-item">
+        <div class="fi-icon">👥</div>
+        <div class="fi-text">通讯录对账</div>
+      </div>
+      <div class="feature-item">
+        <div class="fi-icon">🔔</div>
+        <div class="fi-text">生日提醒</div>
+      </div>
+      <div class="feature-item">
+        <div class="fi-icon">👨‍👩‍👧</div>
+        <div class="fi-text">家庭共享</div>
+      </div>
+      <div class="feature-item">
+        <div class="fi-icon">📥</div>
+        <div class="fi-text">Excel导入</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>人情账本 · 数据本地存储 · 私密安全</p>
+  </div>
+
+</div>
+
+<script>
+// 获取当前页面的基础URL（去掉share.html和query参数中的文件名）
+var baseUrl = window.location.origin + window.location.pathname;
+var lastSlash = baseUrl.lastIndexOf('/');
+baseUrl = baseUrl.substring(0, lastSlash + 1);
+// 保留sandbox参数
+var params = window.location.search;
+var installUrl = baseUrl + 'install.html' + params;
+var appUrl = baseUrl + 'index.html' + params;
+
+// 检测微信环境
+var ua = navigator.userAgent.toLowerCase();
+var isWechat = ua.indexOf('micromessenger') !== -1;
+
+if (isWechat) {
+  // 微信内：显示引导提示和箭头
+  document.getElementById('wechatTip').classList.add('show');
+  document.getElementById('wechatArrow').classList.add('show');
+}
+
+// 直接安装按钮
+function goInstall() {
+  if (isWechat) {
+    // 微信内无法直接跳转外部浏览器，提示用户
+    document.getElementById('wechatTip').scrollIntoView({ behavior: 'smooth' });
+    document.getElementById('wechatTip').style.animation = 'none';
+    setTimeout(function() {
+      document.getElementById('wechatTip').style.animation = '';
+    }, 10);
+  } else {
+    window.location.href = installUrl;
+  }
+}
+
+// 打开应用
+function goApp() {
+  if (isWechat) {
+    document.getElementById('wechatTip').scrollIntoView({ behavior: 'smooth' });
+  } else {
+    window.location.href = appUrl;
+  }
+}
+
+// 直接显示本地预生成的二维码图片（不依赖任何外部服务）
+  var img = document.createElement('img');
+  img.style.width = '200px';
+  img.style.height = '200px';
+  img.style.border = '0';
+  img.src = 'qrcode.png';
+  img.alt = '扫码安装人情账本';
+  document.getElementById('qrcode').appendChild(img);
+})();
+</script>
+</body>
+</html>

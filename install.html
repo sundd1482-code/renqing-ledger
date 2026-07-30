@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#e74c3c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="人情账本">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<title>安装人情账本</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f5f5f5;
+  color: #2c3e50;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+.app {
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+/* 头部 */
+.hero {
+  background: linear-gradient(135deg, #e74c3c 0%, #ff6b5a 100%);
+  color: #fff;
+  text-align: center;
+  padding: 60px 24px 40px;
+  border-radius: 0 0 28px 28px;
+}
+.hero .app-icon {
+  width: 96px;
+  height: 96px;
+  border-radius: 22px;
+  margin: 0 auto 16px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.hero h1 { font-size: 1.6rem; font-weight: 700; }
+.hero .subtitle { font-size: 0.85rem; opacity: 0.9; margin-top: 6px; }
+.hero .slogan { font-size: 0.78rem; opacity: 0.8; margin-top: 10px; }
+
+/* 已安装检测 */
+.open-bar {
+  text-align: center;
+  padding: 20px 16px;
+}
+.btn-open {
+  display: inline-block;
+  background: linear-gradient(135deg, #e74c3c 0%, #ff6b5a 100%);
+  color: #fff;
+  text-decoration: none;
+  padding: 14px 40px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(231,76,60,0.3);
+}
+
+/* 安装步骤 */
+.section { padding: 0 20px; margin-bottom: 24px; }
+.section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 20px;
+}
+.step {
+  background: #fff;
+  border-radius: 14px;
+  padding: 18px 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+}
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.step-title { font-size: 0.92rem; font-weight: 600; }
+.step-desc {
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  line-height: 1.6;
+  padding-left: 40px;
+}
+.step-img {
+  text-align: center;
+  margin-top: 12px;
+  font-size: 2.5rem;
+}
+
+/* 功能亮点 */
+.features {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 0 20px;
+  margin-bottom: 24px;
+}
+.feature {
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px 10px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.feature .f-icon { font-size: 1.8rem; }
+.feature .f-title { font-size: 0.82rem; font-weight: 600; margin-top: 6px; }
+.feature .f-desc { font-size: 0.7rem; color: #7f8c8d; margin-top: 2px; }
+
+/* 底部 */
+.footer {
+  text-align: center;
+  padding: 30px 20px 40px;
+  font-size: 0.75rem;
+  color: #bdc3c7;
+}
+
+/* Safari 底部提示条 */
+.ios-hint {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: rgba(0,0,0,0.85);
+  color: #fff;
+  text-align: center;
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.ios-hint.show { display: flex; }
+.ios-hint .share-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.ios-hint .share-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: #fff;
+}
+
+@media (max-width: 375px) {
+  .hero { padding: 44px 20px 32px; }
+  .hero .app-icon { width: 80px; height: 80px; font-size: 2.5rem; }
+  .hero h1 { font-size: 1.4rem; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 头部 -->
+  <div class="hero">
+    <div class="app-icon">🧧</div>
+    <h1>人情账本</h1>
+    <p class="subtitle">人情往来记账 · 家庭共享</p>
+    <p class="slogan">人情不糊涂，往来有记录，送礼不亏礼、收礼不失礼</p>
+  </div>
+
+  <!-- 直接打开 -->
+  <div class="open-bar">
+    <a href="./index.html" class="btn-open">打开应用</a>
+    <p style="font-size:0.75rem; color:#bdc3c7; margin-top:10px;">点击上方按钮先体验，满意再安装到桌面</p>
+  </div>
+
+  <!-- 安装步骤 -->
+  <div class="section">
+    <div class="section-title">📱 安装到 iPhone 桌面（3步）</div>
+
+    <div class="step">
+      <div class="step-header">
+        <div class="step-num">1</div>
+        <div class="step-title">点击底部「分享」按钮</div>
+      </div>
+      <div class="step-desc">
+        在 Safari 浏览器中打开本页面，点击屏幕底部中间的
+        <b>分享按钮</b>（一个方框加向上箭头 ↑）
+      </div>
+      <div class="step-img">
+        <svg width="40" height="40" viewBox="0 0 60 60" fill="none">
+          <rect x="10" y="8" width="40" height="34" rx="4" stroke="#e74c3c" stroke-width="2"/>
+          <path d="M30 44 L30 54" stroke="#e74c3c" stroke-width="2"/>
+          <path d="M22 52 L30 54 L38 52" stroke="#e74c3c" stroke-width="2" stroke-linecap="round"/>
+          <path d="M30 8 L30 2 M24 6 L30 2 L36 6" stroke="#e74c3c" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-header">
+        <div class="step-num">2</div>
+        <div class="step-title">找到「添加到主屏幕」</div>
+      </div>
+      <div class="step-desc">
+        在弹出的菜单中，向下滑动，找到
+        <b>「添加到主屏幕」</b>
+        <span style="color:#e74c3c;">（图标是一个 + 号加矩形）</span><br>
+        如果没看到，往左滑第二页也能找到
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-header">
+        <div class="step-num">3</div>
+        <div class="step-title">点击「添加」</div>
+      </div>
+      <div class="step-desc">
+        确认名称（可改成你喜欢的），点击右上角
+        <b>「添加」</b>
+        <span style="color:#e74c3c;">完成！</span><br>
+        桌面上会出现红色「人情账本」图标，点开就是全屏 APP
+      </div>
+    </div>
+  </div>
+
+  <!-- 功能亮点 -->
+  <div class="section">
+    <div class="section-title">✨ 核心功能</div>
+  </div>
+  <div class="features">
+    <div class="feature">
+      <div class="f-icon">✏️</div>
+      <div class="f-title">记一笔</div>
+      <div class="f-desc">30秒记完礼金</div>
+    </div>
+    <div class="feature">
+      <div class="f-icon">📑</div>
+      <div class="f-title">批量记礼金</div>
+      <div class="f-desc">宴席一次录完</div>
+    </div>
+    <div class="feature">
+      <div class="f-icon">👥</div>
+      <div class="f-title">通讯录对账</div>
+      <div class="f-desc">谁多谁少清晰</div>
+    </div>
+    <div class="feature">
+      <div class="f-icon">🔔</div>
+      <div class="f-title">生日提醒</div>
+      <div class="f-desc">农历阳历都支持</div>
+    </div>
+    <div class="feature">
+      <div class="f-icon">👨‍👩‍👧</div>
+      <div class="f-title">家庭共享</div>
+      <div class="f-desc">夫妻共用账本</div>
+    </div>
+    <div class="feature">
+      <div class="f-icon">📥</div>
+      <div class="f-title">Excel导入导出</div>
+      <div class="f-desc">模板批量录入</div>
+    </div>
+  </div>
+
+  <!-- 底部 -->
+  <div class="footer">
+    <p>人情账本 v2.0 · 纯前端应用</p>
+    <p style="margin-top:4px;">数据保存在手机本地 · 私密安全 · 永不上传</p>
+  </div>
+
+</div>
+
+<!-- Safari 底部提示条 -->
+<div class="ios-hint" id="iosHint">
+  <span>点击底部分享按钮</span>
+  <span class="share-icon">
+    <svg viewBox="0 0 24 24"><path d="M18 2L21 5L18 8M21 5H8C6 5 5 6 5 8V22M5 12L2 15L5 18"/></svg>
+  </span>
+  <span>→「添加到主屏幕」</span>
+</div>
+
+<script>
+// 检测 iOS Safari，显示底部提示
+(function() {
+  const ua = navigator.userAgent;
+  const isIOS = /iPad|iPhone|iPod/.test(ua);
+  const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua) || isIOS;
+  // 检测是否已在主屏模式运行（standalone）
+  const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+
+  if (isStandalone) {
+    // 已安装，直接跳转应用
+    window.location.href = './index.html';
+    return;
+  }
+
+  // 如果是从主屏打开但不是standalone，也跳转
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('source') === 'homescreen') {
+    window.location.href = './index.html';
+    return;
+  }
+
+  // 显示底部提示条
+  if (isIOS && isSafari) {
+    setTimeout(() => {
+      document.getElementById('iosHint').classList.add('show');
+    }, 3000);
+  }
+})();
+</script>
+</body>
+</html>
