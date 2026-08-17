@@ -167,6 +167,7 @@ function init() {
   initBatchEventGrid();
   initBatchTypeSwitch();
   initReminderFilter();
+  initAnalysisTabs();
   renderFamilyPanel();
   document.getElementById('batchDate').value = new Date().toISOString().slice(0, 10);
   addBatchRow();
@@ -208,7 +209,7 @@ function toast(msg) {
 function switchPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  const pageMap = { home: 'home', add: 'add', contacts: 'contacts', mine: 'mine' };
+  const pageMap = { home: 'home', add: 'add', contacts: 'contacts', analysis: 'analysis', mine: 'mine' };
   document.getElementById('page-' + pageMap[page]).classList.add('active');
   if (page !== 'add') {
     document.querySelectorAll('.tab').forEach(t => {
@@ -221,6 +222,7 @@ function switchPage(page) {
   }
   if (page === 'home') renderHome();
   if (page === 'contacts') renderContacts();
+  if (page === 'analysis') renderAnalysis();
   if (page === 'mine') renderMine();
   window.scrollTo(0, 0);
 }
@@ -253,30 +255,166 @@ function initTypeSwitch() {
   });
 }
 
-// ====== 人员选择下拉 ======
+// ====== 人员选择（搜索+下拉） ======
 function initPersonSelect() {
-  const sel = document.getElementById('personSelect');
-  sel.innerHTML = '<option value="">点击选择人员</option>' +
-    DB.persons.map(p => `<option value="${p.id}">${p.name}（${p.relation}）</option>`).join('');
-  sel.onchange = () => {
-    selectedPersonId = sel.value;
-    updatePersonDisplay();
-  };
+  const input = document.getElementById('personSearchInput');
+  const dropdown = document.getElementById('personDropdown');
+  if (!input) return;
+  input.oninput = () => filterPersons(input.value);
+  input.onfocus = () => { if (input.value.trim()) filterPersons(input.value); };
+  // 点击外部关闭下拉
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#personPicker')) {
+      dropdown.style.display = 'none';
+    }
+  });
+}
+
+function filterPersons(keyword) {
+  const dropdown = document.getElementById('personDropdown');
+  const input = document.getElementById('personSearchInput');
+  const selectedDiv = document.getElementById('personSelected');
+
+  // 如果已选中人员，输入时清除选中状态
+  if (selectedPersonId && input.value.trim()) {
+    clearSelectedPerson(false);
+  }
+
+  const kw = keyword.trim().toLowerCase();
+  if (!kw) {
+    dropdown.style.display = 'none';
+    return;
+  }
+
+  const matched = DB.persons.filter(p =>
+    p.name.toLowerCase().includes(kw) || (p.relation || '').toLowerCase().includes(kw)
+  ).slice(0, 20);
+
+  if (matched.length === 0) {
+    dropdown.innerHTML = '<div class="dropdown-empty">未找到，点击「＋ 新建人员」</div>';
+  } else {
+    dropdown.innerHTML = matched.map(p => {
+      const colorIdx = (p.name.charCodeAt(0) + p.name.length) % AVATAR_COLORS.length;
+      return `
+        <div class="dropdown-item" onclick="selectPersonFromDropdown('${p.id}')">
+          <div class="dd-avatar" style="background:${AVATAR_COLORS[colorIdx]}">${p.name[0]}</div>
+          <div class="dd-info">
+            <div class="dd-name">${esc(p.name)}</div>
+            <div class="dd-relation">${esc(p.relation)}${p.birthday ? ' · 🎂' : ''}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  dropdown.style.display = '';
+}
+
+function selectPersonFromDropdown(personId) {
+  selectedPersonId = personId;
+  const p = DB.persons.find(x => x.id === personId);
+  if (!p) return;
+  const input = document.getElementById('personSearchInput');
+  const dropdown = document.getElementById('personDropdown');
+  const selectedDiv = document.getElementById('personSelected');
+  const selectedName = document.getElementById('personSelectedName');
+
+  input.value = '';
+  input.style.display = 'none';
+  dropdown.style.display = 'none';
+  selectedDiv.style.display = '';
+  selectedName.textContent = `${p.name}（${p.relation}）`;
+}
+
+function clearSelectedPerson(focusInput = true) {
+  selectedPersonId = null;
+  const input = document.getElementById('personSearchInput');
+  const selectedDiv = document.getElementById('personSelected');
+  const dropdown = document.getElementById('personDropdown');
+  if (input) {
+    input.value = '';
+    input.style.display = '';
+    if (focusInput) input.focus();
+  }
+  if (selectedDiv) selectedDiv.style.display = 'none';
+  if (dropdown) dropdown.style.display = 'none';
 }
 
 function updatePersonDisplay() {
-  const display = document.getElementById('personDisplay');
-  if (!selectedPersonId) {
-    display.innerHTML = '<span class="placeholder">点击选择人员</span>';
-    return;
+  // 兼容旧调用：如果有选中人员，显示选中状态
+  if (selectedPersonId) {
+    const p = DB.persons.find(x => x.id === selectedPersonId);
+    if (p) selectPersonFromDropdown(selectedPersonId);
+  } else {
+    clearSelectedPerson(false);
   }
-  const p = DB.persons.find(x => x.id === selectedPersonId);
-  if (p) display.innerHTML = `<span class="selected-name">${p.name}</span> <span class="muted">（${p.relation}）</span>`;
 }
 
-// ====== 默认日期 ======
+// ====== 日期选择（年月日三个下拉） ======
 function setDefaultDate() {
-  document.getElementById('dateInput').value = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  initDatePicker(now.getFullYear(), now.getMonth() + 1, now.getDate());
+}
+
+function initDatePicker(defaultYear, defaultMonth, defaultDay) {
+  const yearSel = document.getElementById('dateYear');
+  const monthSel = document.getElementById('dateMonth');
+  const daySel = document.getElementById('dateDay');
+  if (!yearSel) return;
+
+  const currentYear = new Date().getFullYear();
+  // 年份：前10年 ~ 当前年+1
+  yearSel.innerHTML = '';
+  for (let y = currentYear - 10; y <= currentYear + 1; y++) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    yearSel.appendChild(opt);
+  }
+  yearSel.value = defaultYear || currentYear;
+
+  // 月份
+  monthSel.innerHTML = '';
+  for (let m = 1; m <= 12; m++) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    monthSel.appendChild(opt);
+  }
+  monthSel.value = defaultMonth || (new Date().getMonth() + 1);
+
+  // 天数（根据年月动态生成）
+  updateDays(defaultDay);
+}
+
+function updateDays(defaultDay) {
+  const yearSel = document.getElementById('dateYear');
+  const monthSel = document.getElementById('dateMonth');
+  const daySel = document.getElementById('dateDay');
+  if (!yearSel || !monthSel || !daySel) return;
+
+  const y = parseInt(yearSel.value);
+  const m = parseInt(monthSel.value);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const currentDay = defaultDay || parseInt(daySel.value) || new Date().getDate();
+  daySel.innerHTML = '';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const opt = document.createElement('option');
+    opt.value = d;
+    opt.textContent = d;
+    daySel.appendChild(opt);
+  }
+  daySel.value = Math.min(currentDay, daysInMonth);
+}
+
+function getSelectedDate() {
+  const yearSel = document.getElementById('dateYear');
+  const monthSel = document.getElementById('dateMonth');
+  const daySel = document.getElementById('dateDay');
+  if (!yearSel || !yearSel.value) return '';
+  const y = yearSel.value;
+  const m = String(monthSel.value).padStart(2, '0');
+  const d = String(daySel.value).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 // ====== 重置表单 ======
@@ -284,23 +422,29 @@ function resetForm() {
   currentRecordType = 'out';
   currentEvent = null;
   selectedPersonId = null;
+  editingRecordId = null;
   document.querySelectorAll('.type-option').forEach(e => e.classList.remove('active'));
-  document.querySelector('.type-option[data-type="out"]').classList.add('active');
+  const outOption = document.querySelector('.type-option[data-type="out"]');
+  if (outOption) outOption.classList.add('active');
   document.querySelectorAll('.event-option').forEach(e => e.classList.remove('active'));
   document.getElementById('amountInput').value = '';
   document.getElementById('giftInput').value = '';
   document.getElementById('locationInput').value = '';
   document.getElementById('remarkInput').value = '';
   setDefaultDate();
-  initPersonSelect();
-  updatePersonDisplay();
+  clearSelectedPerson(false);
+  // 隐藏保存按钮的编辑模式标记
+  const saveBtn = document.getElementById('saveRecordBtn');
+  if (saveBtn) saveBtn.textContent = '保存记录';
 }
 
 // ====== 保存记录 ======
+let editingRecordId = null;
+
 function saveRecord() {
   const personId = selectedPersonId;
   const amount = parseFloat(document.getElementById('amountInput').value);
-  const date = document.getElementById('dateInput').value;
+  const date = getSelectedDate();
   const gift = document.getElementById('giftInput').value.trim();
   const location = document.getElementById('locationInput').value.trim();
   const remark = document.getElementById('remarkInput').value.trim();
@@ -313,29 +457,84 @@ function saveRecord() {
   const person = DB.persons.find(p => p.id === personId);
   if (!person) { toast('人员不存在'); return; }
 
-  const record = {
-    id: uuid(),
-    personId,
-    personName: person.name,
-    type: currentRecordType,       // 'out'=我送出, 'in'=我收到
-    eventType: currentEvent,
-    amount,
-    date,
-    gift,
-    location,
-    remark,
-    operator: DB.family ? DB.family.myName : '',
-    createTime: Date.now()
-  };
+  if (editingRecordId) {
+    // 编辑模式
+    const r = DB.records.find(x => x.id === editingRecordId);
+    if (!r) { toast('记录不存在'); return; }
+    r.personId = personId;
+    r.personName = person.name;
+    r.type = currentRecordType;
+    r.eventType = currentEvent;
+    r.amount = amount;
+    r.date = date;
+    r.gift = gift;
+    r.location = location;
+    r.remark = remark;
+    toast('记录已更新 ✓');
+  } else {
+    const record = {
+      id: uuid(),
+      personId,
+      personName: person.name,
+      type: currentRecordType,
+      eventType: currentEvent,
+      amount,
+      date,
+      gift,
+      location,
+      remark,
+      operator: DB.family ? DB.family.myName : '',
+      createTime: Date.now()
+    };
+    DB.records.push(record);
+    toast('记录成功 ✓');
+  }
 
-  DB.records.push(record);
   saveData();
-  toast('记录成功 ✓');
   resetForm();
   renderHome();
   renderContacts();
   renderMine();
-  setTimeout(() => switchPage('home'), 800);
+  if (window._accountPersonId) {
+    // 如果从对账弹窗进入编辑，重新打开对账弹窗
+    const pid = window._accountPersonId;
+    window._accountPersonId = null;
+    setTimeout(() => openAccount(pid), 100);
+  } else {
+    setTimeout(() => switchPage('home'), 800);
+  }
+}
+
+// ====== 编辑记录（从对账弹窗或记录详情进入） ======
+function editRecord(recordId) {
+  const r = DB.records.find(x => x.id === recordId);
+  if (!r) return;
+  closeRecordModal();
+  closeAccountModal();
+  switchPage('add');
+  // 填充表单
+  editingRecordId = recordId;
+  currentRecordType = r.type;
+  currentEvent = r.eventType;
+  selectedPersonId = r.personId;
+  document.querySelectorAll('.type-option').forEach(e => e.classList.remove('active'));
+  const typeEl = document.querySelector(`.type-option[data-type="${r.type}"]`);
+  if (typeEl) typeEl.classList.add('active');
+  document.querySelectorAll('.event-option').forEach(e => e.classList.remove('active'));
+  const eventEl = document.querySelector(`.event-option[data-event="${r.eventType}"]`);
+  if (eventEl) eventEl.classList.add('active');
+  document.getElementById('amountInput').value = r.amount;
+  document.getElementById('giftInput').value = r.gift || '';
+  document.getElementById('locationInput').value = r.location || '';
+  document.getElementById('remarkInput').value = r.remark || '';
+  // 设置日期
+  const parts = r.date.split('-');
+  initDatePicker(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
+  // 显示已选中人员
+  selectPersonFromDropdown(r.personId);
+  // 修改保存按钮文字
+  const saveBtn = document.getElementById('saveRecordBtn');
+  if (saveBtn) saveBtn.textContent = '保存修改';
 }
 
 // ====== 人员弹窗 ======
@@ -539,27 +738,6 @@ function renderHome() {
 
   // 近期提醒
   renderReminders();
-
-  // 最近记录
-  const recent = [...DB.records].sort((a, b) => (b.createTime || 0) - (a.createTime || 0)).slice(0, 8);
-  const recentList = document.getElementById('recentList');
-  if (recent.length === 0) {
-    recentList.innerHTML = '<div class="empty-hint">还没有记录，点击「记一笔」开始</div>';
-  } else {
-    recentList.innerHTML = recent.map(r => {
-      const eventObj = EVENT_TYPES.find(e => e.key === r.eventType) || { icon: '📋' };
-      return `
-        <div class="record-item" onclick="openRecordModal('${r.id}')">
-          <div class="rec-icon ${r.type}">${eventObj.icon}</div>
-          <div class="rec-content">
-            <div class="rec-name">${esc(r.personName)}${r.operator ? `<span class="rec-operator">${esc(r.operator)}</span>` : ''}</div>
-            <div class="rec-info">${r.eventType} · ${formatDateShort(r.date)}</div>
-          </div>
-          <div class="rec-amount ${r.type}">${r.type === 'out' ? '-' : '+'}¥${fmt(r.amount)}</div>
-        </div>
-      `;
-    }).join('');
-  }
 }
 
 // ====== 渲染：提醒 ======
@@ -573,7 +751,7 @@ function renderReminders() {
     const bday = getNextBirthday(p);
     if (!bday) return;
     const days = Math.ceil((bday.date - today) / (1000 * 60 * 60 * 24));
-    if (days <= 30) {
+    if (days <= 7) {
       reminders.push({
         person: p,
         days,
@@ -585,25 +763,7 @@ function renderReminders() {
     }
   });
 
-  // 检查需要回礼的人（对方送过我，但我没送过对方 / 送的明显少）
-  DB.persons.forEach(p => {
-    const stats = getPersonStats(p.id);
-    // 如果对方送我超过 200 且我送出为 0 或差额很大，提醒回礼
-    if (stats.totalIn > 200 && stats.totalOut === 0) {
-      reminders.push({
-        person: p,
-        days: -1,
-        type: 'return',
-        amount: stats.totalIn
-      });
-    }
-  });
-
-  reminders.sort((a, b) => {
-    if (a.days === -1) return 1;
-    if (b.days === -1) return -1;
-    return a.days - b.days;
-  });
+  reminders.sort((a, b) => a.days - b.days);
 
   const list = document.getElementById('reminderList');
   const badge = document.getElementById('reminderCount');
@@ -618,31 +778,18 @@ function renderReminders() {
   badge.textContent = reminders.length;
 
   list.innerHTML = reminders.slice(0, 5).map(r => {
-    if (r.type === 'birthday') {
-      const urgent = r.days <= 7 ? 'urgent' : '';
-      const dayText = r.days === 0 ? '今天' : `${r.days}天后`;
-      return `
-        <div class="reminder-item ${urgent}" onclick="openReminderCenter()">
-          <div class="r-icon">🎂</div>
-          <div class="r-content">
-            <div class="r-name">${esc(r.person.name)} 生日</div>
-            <div class="r-desc">${r.display || formatDate(r.date.toISOString().slice(0,10))}</div>
-          </div>
-          <div class="r-days">${dayText}</div>
+    const urgent = r.days <= 3 ? 'urgent' : '';
+    const dayText = r.days === 0 ? '今天' : `${r.days}天后`;
+    return `
+      <div class="reminder-item ${urgent}" onclick="openReminderCenter()">
+        <div class="r-icon">🎂</div>
+        <div class="r-content">
+          <div class="r-name">${esc(r.person.name)} 生日</div>
+          <div class="r-desc">${r.display || formatDate(r.date.toISOString().slice(0,10))}</div>
         </div>
-      `;
-    } else if (r.type === 'return') {
-      return `
-        <div class="reminder-item" style="border-left-color: var(--blue);" onclick="openReminderCenter()">
-          <div class="r-icon">🔁</div>
-          <div class="r-content">
-            <div class="r-name">${r.person.name} 待回礼</div>
-            <div class="r-desc">对方送过你 ¥${fmt(r.amount)}，尚未回礼</div>
-          </div>
-          <div class="r-days" style="color: var(--blue);">需回礼</div>
-        </div>
-      `;
-    }
+        <div class="r-days">${dayText}</div>
+      </div>
+    `;
   }).join('');
 }
 
@@ -749,23 +896,39 @@ function openAccount(personId) {
       records.map(r => {
         const eventObj = EVENT_TYPES.find(e => e.key === r.eventType) || { icon: '📋' };
         return `
-          <div class="account-record" onclick="openRecordModal('${r.id}')">
-            <div class="ar-date">${formatDateShort(r.date)}</div>
-            <div class="ar-content">
+          <div class="account-record">
+            <div class="ar-date">${formatDateFull(r.date)}</div>
+            <div class="ar-content" onclick="openRecordModal('${r.id}')">
               <div class="ar-event">${eventObj.icon} ${r.eventType}${r.gift ? ' · ' + esc(r.gift) : ''}</div>
               <div class="ar-remark">${r.location ? esc(r.location) + ' · ' : ''}${r.remark ? esc(r.remark) + ' · ' : ''}${r.operator ? '记：' + esc(r.operator) : ''}</div>
             </div>
             <div class="ar-amount ${r.type}">${r.type === 'out' ? '-' : '+'}¥${fmt(r.amount)}</div>
+            <div class="ar-edit" onclick="event.stopPropagation(); editRecordFromAccount('${r.id}', '${person.id}')">✏️</div>
           </div>
         `;
       }).join('')
     }
-    <div style="margin-top:16px;">
+    <div style="display:flex; gap:8px; margin-top:16px;">
+      <button class="btn-primary" onclick="addRecordForPerson('${person.id}')">＋ 新增记录</button>
       <button class="btn-outline" onclick="closeAccountModal(); openPersonModal('${person.id}');">编辑人员</button>
     </div>
   `;
 
   document.getElementById('accountModal').classList.add('active');
+}
+
+// 从对账弹窗新增记录
+function addRecordForPerson(personId) {
+  closeAccountModal();
+  switchPage('add');
+  selectedPersonId = personId;
+  selectPersonFromDropdown(personId);
+}
+
+// 从对账弹窗编辑记录
+function editRecordFromAccount(recordId, personId) {
+  window._accountPersonId = personId;
+  editRecord(recordId);
 }
 
 function closeAccountModal() {
@@ -796,6 +959,7 @@ function openRecordModal(recordId) {
     ${r.location ? `<div class="detail-row"><span class="d-label">宴席地点</span><span class="d-value">${esc(r.location)}</span></div>` : ''}
     ${r.remark ? `<div class="detail-row"><span class="d-label">备注</span><span class="d-value">${esc(r.remark)}</span></div>` : ''}
     <div class="detail-actions">
+      <button class="btn-primary" onclick="editRecord('${r.id}')">✏️ 编辑</button>
       <button class="btn-danger-outline" onclick="deleteRecord('${r.id}')">删除</button>
       <button class="btn-outline" onclick="closeRecordModal()">关闭</button>
     </div>
@@ -1134,7 +1298,7 @@ function renderReminderCenter() {
     const bday = getNextBirthday(p);
     if (!bday) return;
     const days = Math.ceil((bday.date - today) / (1000 * 60 * 60 * 24));
-    if (days <= 90) {
+    if (days <= 7) {
       reminders.push({
         person: p,
         days,
@@ -1146,37 +1310,7 @@ function renderReminderCenter() {
     }
   });
 
-  // 待回礼
-  DB.persons.forEach(p => {
-    const stats = getPersonStats(p.id);
-    if (stats.totalIn > 200 && stats.totalOut === 0) {
-      reminders.push({
-        person: p,
-        days: -1,
-        type: 'return',
-        amount: stats.totalIn
-      });
-    }
-  });
-
-  // 部分回礼（对方送我多，我送了一些但还不够）
-  DB.persons.forEach(p => {
-    const stats = getPersonStats(p.id);
-    if (stats.totalIn > 200 && stats.totalOut > 0 && stats.balance > 200) {
-      reminders.push({
-        person: p,
-        days: -1,
-        type: 'return',
-        amount: stats.balance
-      });
-    }
-  });
-
-  reminders.sort((a, b) => {
-    if (a.days === -1) return 1;
-    if (b.days === -1) return -1;
-    return a.days - b.days;
-  });
+  reminders.sort((a, b) => a.days - b.days);
 
   const filtered = currentReminderFilter === 'all'
     ? reminders
@@ -1189,32 +1323,19 @@ function renderReminderCenter() {
   }
 
   list.innerHTML = filtered.map(r => {
-    if (r.type === 'birthday') {
-      let tagClass = 'normal', tagText = `${r.days}天后`;
-      if (r.days <= 7) { tagClass = 'urgent'; tagText = r.days === 0 ? '今天！' : `${r.days}天后`; }
-      else if (r.days <= 30) { tagClass = 'soon'; tagText = `${r.days}天后`; }
-      return `
-        <div class="reminder-center-item">
-          <div class="rc-icon" style="background:#fff3e0;">🎂</div>
-          <div class="rc-content">
-            <div class="rc-name">${esc(r.person.name)} 生日</div>
-            <div class="rc-desc">${esc(r.person.relation)} · ${r.display || formatDate(r.date.toISOString().slice(0,10))}</div>
-          </div>
-          <div class="rc-tag ${tagClass}">${tagText}</div>
+    let tagClass = 'normal', tagText = `${r.days}天后`;
+    if (r.days <= 3) { tagClass = 'urgent'; tagText = r.days === 0 ? '今天！' : `${r.days}天后`; }
+    else if (r.days <= 7) { tagClass = 'soon'; tagText = `${r.days}天后`; }
+    return `
+      <div class="reminder-center-item">
+        <div class="rc-icon" style="background:#fff3e0;">🎂</div>
+        <div class="rc-content">
+          <div class="rc-name">${esc(r.person.name)} 生日</div>
+          <div class="rc-desc">${esc(r.person.relation)} · ${r.display || formatDate(r.date.toISOString().slice(0,10))}</div>
         </div>
-      `;
-    } else if (r.type === 'return') {
-      return `
-        <div class="reminder-center-item">
-          <div class="rc-icon" style="background:#e3f2fd;">🔁</div>
-          <div class="rc-content">
-            <div class="rc-name">${r.person.name} 待回礼</div>
-            <div class="rc-desc">${r.person.relation} · 对方送过你 ¥${fmt(r.amount)}</div>
-          </div>
-          <div class="rc-tag return">需回礼</div>
-        </div>
-      `;
-    }
+        <div class="rc-tag ${tagClass}">${tagText}</div>
+      </div>
+    `;
   }).join('');
 }
 
@@ -1591,13 +1712,34 @@ function exportPersonTemplate() {
 
 // ====== 导出礼金往来模板 ======
 function exportRecordTemplate() {
-  const template = [
-    { '日期': '2025-01-15', '姓名': '张三', '事件类型': '结婚', '收支': '我收到', '金额': 500, '实物礼品': '中华烟一条', '宴席地点': 'XX大酒店', '备注': '红包+礼品' },
-    { '日期': '2025-01-15', '姓名': '李四', '事件类型': '结婚', '收支': '我收到', '金额': 300, '实物礼品': '', '宴席地点': 'XX大酒店', '备注': '' },
-    { '日期': '2025-02-01', '姓名': '王五', '事件类型': '满月', '收支': '我送出', '金额': 600, '实物礼品': '水果礼盒', '宴席地点': '', '备注': '同事孩子满月' }
-  ];
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(template);
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['日期', '姓名', '事件类型', '收支', '金额', '实物礼品', '宴席地点', '备注']
+  ]);
+  // 设置日期列格式为 Excel 日期序列号
+  const sampleDates = ['2025-01-15', '2025-01-15', '2025-02-01'];
+  const sampleData = [
+    ['2025-01-15', '张三', '结婚', '我收到', 500, '中华烟一条', 'XX大酒店', '红包+礼品'],
+    ['2025-01-15', '李四', '结婚', '我收到', 300, '', 'XX大酒店', ''],
+    ['2025-02-01', '王五', '满月', '我送出', 600, '水果礼盒', '', '同事孩子满月']
+  ];
+  sampleData.forEach((row, ri) => {
+    const excelRow = ri + 1;
+    // 日期单元格：转为 Excel 序列号并设置日期格式
+    const dateParts = row[0].split('-');
+    const jsDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+    const excelSerial = Math.round((jsDate.getTime() / 86400000) + 25569);
+    ws[XLSX.utils.encode_cell({ r: excelRow, c: 0 })] = {
+      t: 'n', v: excelSerial, z: 'yyyy-mm-dd'
+    };
+    // 其他列正常写入
+    for (let ci = 1; ci < row.length; ci++) {
+      ws[XLSX.utils.encode_cell({ r: excelRow, c: ci })] = {
+        t: typeof row[ci] === 'number' ? 'n' : 's',
+        v: row[ci]
+      };
+    }
+  });
   ws['!cols'] = [{wch:12},{wch:10},{wch:10},{wch:8},{wch:8},{wch:14},{wch:14},{wch:16}];
   XLSX.utils.book_append_sheet(wb, ws, '礼金往来模板');
   XLSX.writeFile(wb, '礼金往来模板.xlsx');
@@ -1683,9 +1825,9 @@ function importRecordTemplate(event) {
   reader.onload = (e) => {
     try {
       const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, { type: 'array' });
+      const wb = XLSX.read(data, { type: 'array', cellDates: false });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
       if (rows.length === 0) { toast('模板中没有数据'); event.target.value = ''; return; }
 
       const validEvents = EVENT_TYPES.map(e => e.key);
@@ -1697,15 +1839,25 @@ function importRecordTemplate(event) {
         const amount = parseFloat(amountStr);
         if (!name || !amount || amount <= 0) { errors++; return; }
 
-        const dateStr = (row['日期'] || '').toString().trim();
+        const rawDate = row['日期'];
         let date = '';
-        if (typeof dateStr === 'number') {
-          const d = new Date((dateStr - 25569) * 86400 * 1000);
+        if (typeof rawDate === 'number') {
+          // Excel 日期序列号
+          const d = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
           if (!isNaN(d)) date = d.toISOString().slice(0, 10);
+        } else if (rawDate instanceof Date) {
+          date = rawDate.toISOString().slice(0, 10);
         } else {
-          const d = new Date(dateStr);
-          if (!isNaN(d)) date = d.toISOString().slice(0, 10);
-          else date = new Date().toISOString().slice(0, 10);
+          const dateStr = (rawDate || '').toString().trim();
+          // 尝试 YYYY-MM-DD 或 YYYY/MM/DD 格式
+          const m = dateStr.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+          if (m) {
+            date = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+          } else {
+            const d = new Date(dateStr);
+            if (!isNaN(d)) date = d.toISOString().slice(0, 10);
+            else date = new Date().toISOString().slice(0, 10);
+          }
         }
 
         let eventType = (row['事件类型'] || '其他').toString().trim();
@@ -1791,6 +1943,150 @@ function formatDateShort(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
   return `${d.getMonth()+1}.${d.getDate()}`;
+}
+
+function formatDateFull(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()}`;
+}
+
+// ====== 数据分析页面 ======
+let analysisRange = 'all';
+let analysisFilter = 'all';
+let analysisCustomStart = '';
+let analysisCustomEnd = '';
+
+function initAnalysisTabs() {
+  // 时间范围标签
+  document.querySelectorAll('#analysisRangeTabs .range-tab').forEach(tab => {
+    tab.onclick = () => {
+      analysisRange = tab.dataset.range;
+      document.querySelectorAll('#analysisRangeTabs .range-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const customDiv = document.getElementById('customDateRange');
+      customDiv.style.display = analysisRange === 'custom' ? '' : 'none';
+      if (analysisRange !== 'custom') renderAnalysis();
+    };
+  });
+  // 关系筛选标签
+  document.querySelectorAll('#analysisFilterTabs .filter-tab').forEach(tab => {
+    tab.onclick = () => {
+      analysisFilter = tab.dataset.rel;
+      document.querySelectorAll('#analysisFilterTabs .filter-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      renderAnalysis();
+    };
+  });
+  // 默认日期
+  const today = new Date().toISOString().slice(0, 10);
+  const yearStart = new Date().getFullYear() + '-01-01';
+  document.getElementById('analysisStartDate').value = yearStart;
+  document.getElementById('analysisEndDate').value = today;
+}
+
+function applyCustomRange() {
+  analysisCustomStart = document.getElementById('analysisStartDate').value;
+  analysisCustomEnd = document.getElementById('analysisEndDate').value;
+  renderAnalysis();
+}
+
+function getAnalysisRecords() {
+  let records = DB.records;
+  // 时间范围筛选
+  if (analysisRange === 'year') {
+    const year = new Date().getFullYear();
+    records = records.filter(r => r.date.startsWith(year));
+  } else if (analysisRange === 'custom' && analysisCustomStart && analysisCustomEnd) {
+    records = records.filter(r => r.date >= analysisCustomStart && r.date <= analysisCustomEnd);
+  }
+  // 关系筛选
+  if (analysisFilter !== 'all') {
+    const personIds = DB.persons.filter(p => p.relation === analysisFilter).map(p => p.id);
+    records = records.filter(r => personIds.includes(r.personId));
+  }
+  return records;
+}
+
+function renderAnalysis() {
+  const records = getAnalysisRecords();
+  let totalOut = 0, totalIn = 0;
+  records.forEach(r => {
+    if (r.type === 'out') totalOut += r.amount;
+    else totalIn += r.amount;
+  });
+  const net = totalOut - totalIn;
+
+  // 汇总卡片
+  document.getElementById('analysisSummary').innerHTML = `
+    <div class="summary-card">
+      <div class="label">送出总额</div>
+      <div class="amount red">¥${fmt(totalOut)}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">收到总额</div>
+      <div class="amount green">¥${fmt(totalIn)}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">净支出</div>
+      <div class="amount ${net > 0 ? 'red' : 'green'}">¥${fmt(net)}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">笔数</div>
+      <div class="amount blue">${records.length}</div>
+    </div>
+  `;
+
+  // 按关系分类统计
+  const relationStats = {};
+  records.forEach(r => {
+    const person = DB.persons.find(p => p.id === r.personId);
+    const rel = person ? person.relation : '未知';
+    if (!relationStats[rel]) relationStats[rel] = { out: 0, in: 0, count: 0 };
+    if (r.type === 'out') relationStats[rel].out += r.amount;
+    else relationStats[rel].in += r.amount;
+    relationStats[rel].count++;
+  });
+  const relRows = Object.entries(relationStats).sort((a, b) => (b[1].out + b[1].in) - (a[1].out + a[1].in));
+  document.getElementById('analysisByRelation').innerHTML = relRows.length === 0
+    ? '<div class="empty-hint">暂无数据</div>'
+    : `<table class="analysis-table"><thead><tr><th>关系</th><th>送出</th><th>收到</th><th>笔数</th></tr></thead><tbody>
+      ${relRows.map(([rel, s]) => `<tr><td>${rel}</td><td class="red">¥${fmt(s.out)}</td><td class="green">¥${fmt(s.in)}</td><td>${s.count}</td></tr>`).join('')}
+    </tbody></table>`;
+
+  // 按事件类型统计
+  const eventStats = {};
+  records.forEach(r => {
+    if (!eventStats[r.eventType]) eventStats[r.eventType] = { out: 0, in: 0, count: 0 };
+    if (r.type === 'out') eventStats[r.eventType].out += r.amount;
+    else eventStats[r.eventType].in += r.amount;
+    eventStats[r.eventType].count++;
+  });
+  const eventRows = Object.entries(eventStats).sort((a, b) => (b[1].out + b[1].in) - (a[1].out + a[1].in));
+  document.getElementById('analysisByEvent').innerHTML = eventRows.length === 0
+    ? '<div class="empty-hint">暂无数据</div>'
+    : `<table class="analysis-table"><thead><tr><th>事件</th><th>送出</th><th>收到</th><th>笔数</th></tr></thead><tbody>
+      ${eventRows.map(([evt, s]) => {
+        const eObj = EVENT_TYPES.find(e => e.key === evt);
+        return `<tr><td>${eObj ? eObj.icon : ''} ${evt}</td><td class="red">¥${fmt(s.out)}</td><td class="green">¥${fmt(s.in)}</td><td>${s.count}</td></tr>`;
+      }).join('')}
+    </tbody></table>`;
+
+  // 月度趋势
+  const monthStats = {};
+  records.forEach(r => {
+    const month = r.date.slice(0, 7); // YYYY-MM
+    if (!monthStats[month]) monthStats[month] = { out: 0, in: 0, count: 0 };
+    if (r.type === 'out') monthStats[month].out += r.amount;
+    else monthStats[month].in += r.amount;
+    monthStats[month].count++;
+  });
+  const monthRows = Object.entries(monthStats).sort((a, b) => a[0].localeCompare(b[0]));
+  document.getElementById('analysisByMonth').innerHTML = monthRows.length === 0
+    ? '<div class="empty-hint">暂无数据</div>'
+    : `<table class="analysis-table"><thead><tr><th>月份</th><th>送出</th><th>收到</th><th>笔数</th></tr></thead><tbody>
+      ${monthRows.map(([month, s]) => `<tr><td>${month}</td><td class="red">¥${fmt(s.out)}</td><td class="green">¥${fmt(s.in)}</td><td>${s.count}</td></tr>`).join('')}
+    </tbody></table>`;
 }
 
 // ====== 启动 ======

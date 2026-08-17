@@ -915,7 +915,174 @@ body {
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
-/* ===== 批量记礼金行（增加备注后调整布局） ===== */
+/* ===== 人员搜索下拉 ===== */
+.person-search-input {
+  width: 100%;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 0.88rem;
+  outline: none;
+  background: var(--card);
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+.person-search-input:focus { border-color: var(--primary); }
+.person-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dropdown-item:active { background: var(--bg); }
+.dd-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+.dd-info { flex: 1; min-width: 0; }
+.dd-name { font-size: 0.88rem; font-weight: 600; }
+.dd-relation { font-size: 0.72rem; color: var(--text-light); }
+.dropdown-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.person-selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1.5px solid var(--primary);
+  background: var(--primary-bg);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+.person-selected .selected-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.person-selected .selected-clear {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 4px;
+}
+
+/* ===== 日期三选下拉 ===== */
+.date-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.date-select {
+  flex: 1;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 6px;
+  font-size: 0.88rem;
+  color: var(--text);
+  background: var(--card);
+  outline: none;
+  font-family: inherit;
+  text-align: center;
+}
+.date-select:focus { border-color: var(--primary); }
+.date-sep {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  font-weight: 600;
+}
+
+/* ===== 数据分析页面 ===== */
+.analysis-range-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.range-tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px 0;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-light);
+  background: var(--card);
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1.5px solid var(--border);
+}
+.range-tab.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.custom-date-range { margin-top: 8px; }
+.analysis-table-wrap { overflow-x: auto; }
+.analysis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.analysis-table thead {
+  background: var(--bg);
+}
+.analysis-table th {
+  padding: 10px 8px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--text-light);
+  font-size: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.analysis-table td {
+  padding: 10px 8px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.analysis-table td.red { color: var(--primary); font-weight: 600; }
+.analysis-table td.green { color: var(--green); font-weight: 600; }
+.analysis-table tbody tr:last-child td { border-bottom: none; }
+
+/* ===== 对账弹窗编辑按钮 ===== */
+.account-record .ar-edit {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.account-record .ar-edit:active { color: var(--primary); }
+.account-record .ar-content { cursor: pointer; }
+
+/* ===== 底部导航5tab布局调整 ===== */
+.tabbar { justify-content: space-around; }
+.tab-center { flex: 0.7; }
 .batch-record-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .batch-record-row {
   display: flex;
