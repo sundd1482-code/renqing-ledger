@@ -169,7 +169,7 @@ function init() {
   initReminderFilter();
   initAnalysisTabs();
   renderFamilyPanel();
-  document.getElementById('batchDate').value = new Date().toISOString().slice(0, 10);
+  setBatchDate(batchDateValue || todayStr());
   addBatchRow();
   renderHome();
   renderContacts();
@@ -356,66 +356,174 @@ function setDefaultDate() {
 }
 
 function initDatePicker(defaultYear, defaultMonth, defaultDay) {
-  const yearSel = document.getElementById('dateYear');
-  const monthSel = document.getElementById('dateMonth');
-  const daySel = document.getElementById('dateDay');
-  if (!yearSel) return;
-
-  const currentYear = new Date().getFullYear();
-  // 年份：前10年 ~ 当前年+1
-  yearSel.innerHTML = '';
-  for (let y = currentYear - 10; y <= currentYear + 1; y++) {
-    const opt = document.createElement('option');
-    opt.value = y;
-    opt.textContent = y;
-    yearSel.appendChild(opt);
-  }
-  yearSel.value = defaultYear || currentYear;
-
-  // 月份
-  monthSel.innerHTML = '';
-  for (let m = 1; m <= 12; m++) {
-    const opt = document.createElement('option');
-    opt.value = m;
-    opt.textContent = m;
-    monthSel.appendChild(opt);
-  }
-  monthSel.value = defaultMonth || (new Date().getMonth() + 1);
-
-  // 天数（根据年月动态生成）
-  updateDays(defaultDay);
+  const now = new Date();
+  const y = defaultYear || now.getFullYear();
+  const m = defaultMonth || now.getMonth() + 1;
+  const d = defaultDay || now.getDate();
+  setSelectedDate(`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
 }
 
-function updateDays(defaultDay) {
-  const yearSel = document.getElementById('dateYear');
-  const monthSel = document.getElementById('dateMonth');
-  const daySel = document.getElementById('dateDay');
-  if (!yearSel || !monthSel || !daySel) return;
+/* ====== 滚轮日期选择器（记一笔 / 批量记礼金共用） ======
+ * 点一下日期栏 → 底部弹出三列滚轮（年/月/日并排，同时可滑）→ 滑动选择 → 确定
+ * 三列独立滚动互不干扰，年/月切换时自动重建"日"列并校正天数
+ */
+let selectedDate = '';            // 记一笔：当前日期 YYYY-MM-DD
+let batchDateValue = '';          // 批量记礼金：当前日期 YYYY-MM-DD
+let datePickerTarget = 'record';  // 'record' | 'batch' 当前弹窗服务于哪个场景
+let wheelScrollTimer = null;
+const WHEEL_ITEM_H = 44;          // 滚轮单项高度(px)，与CSS .picker-item 保持一致
 
-  const y = parseInt(yearSel.value);
-  const m = parseInt(monthSel.value);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const currentDay = defaultDay || parseInt(daySel.value) || new Date().getDate();
-  daySel.innerHTML = '';
-  for (let d = 1; d <= daysInMonth; d++) {
-    const opt = document.createElement('option');
-    opt.value = d;
-    opt.textContent = d;
-    daySel.appendChild(opt);
-  }
-  daySel.value = Math.min(currentDay, daysInMonth);
+function normalizeDate(s) {
+  if (!s) return '';
+  const parts = String(s).split('-').map(n => parseInt(n));
+  if (parts.length !== 3 || parts.some(isNaN)) return '';
+  const [y, m, d] = parts;
+  return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+
+function todayStr() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
+function updateDateDisplay(elId, dateStr) {
+  const el = document.getElementById(elId);
+  if (!el || !dateStr) return;
+  const [y, m, d] = dateStr.split('-').map(n => parseInt(n));
+  el.textContent = `${y}年${m}月${d}日`;
+}
+
+function setSelectedDate(dateStr) {
+  selectedDate = normalizeDate(dateStr) || todayStr();
+  updateDateDisplay('dateValue', selectedDate);
+}
+
+function setBatchDate(dateStr) {
+  batchDateValue = normalizeDate(dateStr) || todayStr();
+  updateDateDisplay('batchDateValue', batchDateValue);
 }
 
 function getSelectedDate() {
-  const yearSel = document.getElementById('dateYear');
-  const monthSel = document.getElementById('dateMonth');
-  const daySel = document.getElementById('dateDay');
-  if (!yearSel || !yearSel.value) return '';
-  const y = yearSel.value;
-  const m = String(monthSel.value).padStart(2, '0');
-  const d = String(daySel.value).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  if (!selectedDate) selectedDate = todayStr();
+  return selectedDate;
 }
+
+/* 打开滚轮弹窗（target: 'record' 或 'batch'） */
+function openDatePicker(target) {
+  datePickerTarget = target || 'record';
+  document.getElementById('datePickerModal').classList.add('active');
+  setTimeout(() => {
+    const cur = datePickerTarget === 'batch' ? (batchDateValue || todayStr()) : getSelectedDate();
+    const [y, m, d] = cur.split('-').map(n => parseInt(n));
+    buildWheelCol('wheelYear', 'year', y);
+    buildWheelCol('wheelMonth', 'month', m);
+    buildWheelCol('wheelDay', 'day', d);
+    scrollWheelTo('wheelYear', y);
+    scrollWheelTo('wheelMonth', m);
+    scrollWheelTo('wheelDay', d);
+  }, 80);
+}
+
+function closeDatePicker() {
+  document.getElementById('datePickerModal').classList.remove('active');
+}
+
+/* 生成一列滚轮 */
+function buildWheelCol(id, type, selectedVal) {
+  const col = document.getElementById(id);
+  if (!col) return;
+  let html = '';
+  const now = new Date();
+  if (type === 'year') {
+    for (let y = now.getFullYear() - 10; y <= now.getFullYear() + 1; y++) {
+      html += `<div class="picker-item${y === selectedVal ? ' active' : ''}" data-val="${y}">${y}</div>`;
+    }
+  } else if (type === 'month') {
+    for (let m = 1; m <= 12; m++) {
+      html += `<div class="picker-item${m === selectedVal ? ' active' : ''}" data-val="${m}">${m}</div>`;
+    }
+  } else {
+    const [y, m] = currentWheelYM();
+    const days = new Date(y, m, 0).getDate();
+    for (let d = 1; d <= days; d++) {
+      html += `<div class="picker-item${d === selectedVal ? ' active' : ''}" data-val="${d}">${d}</div>`;
+    }
+  }
+  col.innerHTML = html;
+  col.onscroll = () => onWheelScroll(col, type);
+}
+
+/* 滚动到指定值（居中） */
+function scrollWheelTo(id, val) {
+  const col = document.getElementById(id);
+  if (!col) return;
+  const items = col.querySelectorAll('.picker-item');
+  let idx = -1;
+  items.forEach(it => {
+    const v = parseInt(it.dataset.val);
+    it.classList.toggle('active', v === val);
+    if (v === val) idx = Array.from(items).indexOf(it);
+  });
+  if (idx >= 0) col.scrollTop = idx * WHEEL_ITEM_H;
+}
+
+/* 滚动停止后取居中项作为选中值 */
+function onWheelScroll(col, type) {
+  clearTimeout(wheelScrollTimer);
+  wheelScrollTimer = setTimeout(() => {
+    const items = col.querySelectorAll('.picker-item');
+    const idx = Math.min(items.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
+    const item = items[idx];
+    if (!item) return;
+    items.forEach(it => it.classList.remove('active'));
+    item.classList.add('active');
+    // 年或月变化时，重建"日"列（天数联动），尽量保持原选中日
+    if (type === 'year' || type === 'month') {
+      const dayCol = document.getElementById('wheelDay');
+      const prevDay = dayCol ? (dayCol.querySelector('.picker-item.active') || {}).dataset?.val : null;
+      const [y, m] = currentWheelYM();
+      const days = new Date(y, m, 0).getDate();
+      const keep = Math.min(parseInt(prevDay || todayStr().split('-')[2]), days);
+      buildWheelCol('wheelDay', 'day', keep);
+      scrollWheelTo('wheelDay', keep);
+    }
+  }, 120);
+}
+
+/* 取滚轮当前年月 */
+function currentWheelYM() {
+  const yItem = document.querySelector('#wheelYear .picker-item.active');
+  const mItem = document.querySelector('#wheelMonth .picker-item.active');
+  const now = new Date();
+  const y = yItem ? parseInt(yItem.dataset.val) : now.getFullYear();
+  const m = mItem ? parseInt(mItem.dataset.val) : now.getMonth() + 1;
+  return [y, m];
+}
+
+/* 确认选择 */
+function confirmDatePicker() {
+  const yItem = document.querySelector('#wheelYear .picker-item.active');
+  const mItem = document.querySelector('#wheelMonth .picker-item.active');
+  const dItem = document.querySelector('#wheelDay .picker-item.active');
+  if (!yItem || !mItem || !dItem) { closeDatePicker(); return; }
+  const dateStr = `${yItem.dataset.val}-${String(mItem.dataset.val).padStart(2,'0')}-${String(dItem.dataset.val).padStart(2,'0')}`;
+  if (datePickerTarget === 'batch') setBatchDate(dateStr);
+  else setSelectedDate(dateStr);
+  closeDatePicker();
+}
+
+/* 快捷：滚回今天 */
+function wheelGoToday() {
+  const [y, m, d] = todayStr().split('-').map(n => parseInt(n));
+  const [cy, cm] = currentWheelYM();
+  if (cy !== y || cm !== m) {
+    buildWheelCol('wheelDay', 'day', d);
+  }
+  scrollWheelTo('wheelYear', y);
+  scrollWheelTo('wheelMonth', m);
+  scrollWheelTo('wheelDay', d);
+}
+
 
 // ====== 重置表单 ======
 function resetForm() {
@@ -528,8 +636,7 @@ function editRecord(recordId) {
   document.getElementById('locationInput').value = r.location || '';
   document.getElementById('remarkInput').value = r.remark || '';
   // 设置日期
-  const parts = r.date.split('-');
-  initDatePicker(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
+  setSelectedDate(r.date);
   // 显示已选中人员
   selectPersonFromDropdown(r.personId);
   // 修改保存按钮文字
@@ -917,12 +1024,23 @@ function openAccount(personId) {
   document.getElementById('accountModal').classList.add('active');
 }
 
-// 从对账弹窗新增记录
+// 从对账弹窗新增记录（保存后自动回到对账弹窗）
 function addRecordForPerson(personId) {
   closeAccountModal();
   switchPage('add');
+  editingRecordId = null;
+  window._accountPersonId = personId;  // 标记：保存后回到对账弹窗
   selectedPersonId = personId;
   selectPersonFromDropdown(personId);
+  // 重置表单
+  document.querySelectorAll('.event-option').forEach(e => e.classList.remove('active'));
+  currentEvent = null;
+  document.getElementById('amountInput').value = '';
+  document.getElementById('giftInput').value = '';
+  document.getElementById('locationInput').value = '';
+  document.getElementById('remarkInput').value = '';
+  const saveBtn = document.getElementById('saveRecordBtn');
+  if (saveBtn) saveBtn.textContent = '保存记录';
 }
 
 // 从对账弹窗编辑记录
@@ -1117,7 +1235,7 @@ function openBatchRecordModal() {
   batchEvent = null;
   document.getElementById('batchLocation').value = '';
   document.getElementById('batchRemark').value = '';
-  document.getElementById('batchDate').value = new Date().toISOString().slice(0, 10);
+  setBatchDate(batchDateValue || todayStr());
   document.querySelectorAll('#batchEventGrid .event-option').forEach(e => e.classList.remove('active'));
   document.querySelectorAll('[data-batch-type]').forEach(e => e.classList.remove('active'));
   document.querySelector('[data-batch-type="in"]').classList.add('active');
@@ -1182,7 +1300,10 @@ function renderBatchList() {
     list.innerHTML = batchRows.map((row, i) => `
       <div class="batch-record-row">
         <div class="br-num">${i + 1}</div>
-        <input type="text" class="br-name" placeholder="姓名" value="${esc(row.name)}" oninput="updateBatchRow('${row.id}','name',this.value)">
+        <div class="br-name-wrap">
+          <input type="text" class="br-name" placeholder="姓名🔍" autocomplete="off" value="${esc(row.name)}" oninput="updateBatchRow('${row.id}','name',this.value);searchBatchGuest(this,'${row.id}')">
+          <div class="guest-dropdown" style="display:none"></div>
+        </div>
         <input type="number" class="br-amount" placeholder="¥金额" value="${esc(row.amount)}" oninput="updateBatchRow('${row.id}','amount',this.value)">
         <input type="text" class="br-gift" placeholder="礼品(选填)" value="${esc(row.gift)}" oninput="updateBatchRow('${row.id}','gift',this.value)">
         <input type="text" class="br-note" placeholder="备注(选填)" value="${esc(row.note)}" oninput="updateBatchRow('${row.id}','note',this.value)">
@@ -1191,6 +1312,29 @@ function renderBatchList() {
     `).join('');
   }
   updateBatchTotal();
+}
+
+/* ====== 批量记礼金：来宾通讯录搜索 ====== */
+function searchBatchGuest(inputEl, rowId) {
+  const kw = inputEl.value.trim().toLowerCase();
+  const dd = inputEl.parentElement.querySelector('.guest-dropdown');
+  if (!dd) return;
+  if (!kw) { dd.style.display = 'none'; return; }
+  const matches = DB.persons.filter(p => p.name.toLowerCase().includes(kw)).slice(0, 6);
+  if (matches.length === 0) {
+    dd.innerHTML = '<div class="gd-item gd-none">通讯录无此人，请先去通讯录添加</div>';
+  } else {
+    dd.innerHTML = matches.map(p =>
+      `<div class="gd-item" onclick="selectBatchGuest('${rowId}','${esc(p.name)}')">${esc(p.name)}<span class="gd-rel">${esc(p.relation || '')}</span></div>`
+    ).join('');
+  }
+  dd.style.display = 'block';
+}
+
+function selectBatchGuest(rowId, name) {
+  const row = batchRows.find(r => r.id === rowId);
+  if (row) row.name = name;
+  renderBatchList();
 }
 
 function updateBatchTotal() {
@@ -1206,7 +1350,7 @@ function updateBatchTotal() {
 
 function saveBatchRecords() {
   if (!batchEvent) { toast('请选择事件类型'); return; }
-  const date = document.getElementById('batchDate').value;
+  const date = batchDateValue || todayStr();
   const location = document.getElementById('batchLocation').value.trim();
   const remark = document.getElementById('batchRemark').value.trim();
   if (!date) { toast('请选择日期'); return; }
@@ -1214,7 +1358,18 @@ function saveBatchRecords() {
   const validRows = batchRows.filter(r => r.name.trim() && parseFloat(r.amount) > 0);
   if (validRows.length === 0) { toast('请至少填写一行有效数据'); return; }
 
-  let added = 0, newPersons = 0;
+  // 校验：所有来宾必须已在通讯录中（不自动创建）
+  const notFound = [];
+  validRows.forEach(row => {
+    const name = row.name.trim();
+    if (!DB.persons.find(p => p.name === name)) notFound.push(name);
+  });
+  if (notFound.length > 0) {
+    toast(`不在通讯录：${notFound.join('、')}。请先到通讯录添加后再记`);
+    return;
+  }
+
+  let added = 0;
   validRows.forEach(row => {
     const name = row.name.trim();
     const amount = parseFloat(row.amount);
@@ -1223,21 +1378,9 @@ function saveBatchRecords() {
     const rowRemark = row.note.trim();
     const finalRemark = rowRemark ? rowRemark : remark;
 
-    // 查找或创建人员
-    let person = DB.persons.find(p => p.name === name);
-    if (!person) {
-      person = {
-        id: uuid(),
-        name,
-        relation: '朋友',
-        phone: '',
-        birthday: '',
-        note: '',
-        createTime: Date.now()
-      };
-      DB.persons.push(person);
-      newPersons++;
-    }
+    // 人员必须已存在（保存前已校验）
+    const person = DB.persons.find(p => p.name === name);
+    if (!person) return;
 
     const record = {
       id: uuid(),
@@ -2087,6 +2230,32 @@ function renderAnalysis() {
     : `<table class="analysis-table"><thead><tr><th>月份</th><th>送出</th><th>收到</th><th>笔数</th></tr></thead><tbody>
       ${monthRows.map(([month, s]) => `<tr><td>${month}</td><td class="red">¥${fmt(s.out)}</td><td class="green">¥${fmt(s.in)}</td><td>${s.count}</td></tr>`).join('')}
     </tbody></table>`;
+
+  // ===== 明细记录（跟随当前时间范围+关系筛选，时间倒序，点击查看/编辑）=====
+  const detailList = document.getElementById('analysisDetails');
+  const detailCountEl = document.getElementById('detailCount');
+  if (detailList) {
+    const sorted = [...records].sort((a, b) =>
+      b.date.localeCompare(a.date) || (b.createTime || 0) - (a.createTime || 0)
+    );
+    if (detailCountEl) detailCountEl.textContent = sorted.length;
+    detailList.innerHTML = sorted.length === 0
+      ? '<div class="empty-hint">暂无记录</div>'
+      : sorted.map(r => {
+          const p = DB.persons.find(x => x.id === r.personId);
+          const eObj = EVENT_TYPES.find(e => e.key === r.eventType);
+          const isOut = r.type === 'out';
+          const bits = [p ? p.relation : '', r.gift ? `礼品:${r.gift}` : '', r.remark || ''].filter(Boolean).join(' · ');
+          return `<div class="dq-item" onclick="openRecordModal('${r.id}')">
+            <div class="dq-date">${r.date.replace(/-/g, '.')}</div>
+            <div class="dq-main">
+              <div class="dq-name">${esc(r.personName || (p ? p.name : ''))}<span class="dq-event">${eObj ? eObj.icon + ' ' : ''}${r.eventType}</span></div>
+              <div class="dq-sub">${bits || '&nbsp;'}</div>
+            </div>
+            <div class="dq-amount ${isOut ? 'out' : 'in'}">${isOut ? '-' : '+'}¥${fmt(r.amount)}</div>
+          </div>`;
+        }).join('');
+  }
 }
 
 // ====== 启动 ======
