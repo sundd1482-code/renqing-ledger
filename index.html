@@ -101,13 +101,9 @@
       <!-- 日期 -->
       <div class="form-group">
         <label>发生日期</label>
-        <div class="date-picker-row">
-          <select id="dateYear" class="date-select" onchange="updateDays()"></select>
-          <span class="date-sep">年</span>
-          <select id="dateMonth" class="date-select" onchange="updateDays()"></select>
-          <span class="date-sep">月</span>
-          <select id="dateDay" class="date-select"></select>
-          <span class="date-sep">日</span>
+        <div class="date-display" id="dateDisplay" onclick="openDatePicker()">
+          <span class="date-value" id="dateValue">2026年8月17日</span>
+          <span class="date-arrow">📅</span>
         </div>
       </div>
 
@@ -235,6 +231,18 @@
     <div class="section">
       <div class="section-title"><span>📈</span> 月度趋势</div>
       <div id="analysisByMonth" class="analysis-table-wrap">
+        <!-- JS填充 -->
+      </div>
+    </div>
+
+    <!-- 明细记录查询 -->
+    <div class="section">
+      <div class="section-title">
+        <span>📋</span> 明细记录
+        <span class="badge" id="detailCount">0</span>
+        <span class="muted" style="font-size:0.68rem; margin-left:auto; font-weight:400;">按当前筛选 · 点击可查看编辑</span>
+      </div>
+      <div id="analysisDetails" class="detail-query-list">
         <!-- JS填充 -->
       </div>
     </div>
@@ -463,7 +471,10 @@
       <div class="batch-row">
         <div class="form-group" style="flex:1">
           <label>日期</label>
-          <input type="date" id="batchDate" class="date-input">
+          <div class="date-display" onclick="openDatePicker('batch')">
+            <span class="date-value" id="batchDateValue">今天</span>
+            <span class="date-arrow">📅</span>
+          </div>
         </div>
         <div class="form-group" style="flex:1">
           <label>宴席地点</label>
@@ -608,6 +619,29 @@
         <button class="btn-primary" onclick="importSyncCode()">导入并合并</button>
         <div id="syncImportResult" style="display:none; margin-top:12px;"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 日期滚轮选择弹窗 ========== -->
+<div class="modal-overlay" id="datePickerModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">选择日期</span>
+      <span class="modal-close" onclick="closeDatePicker()">✕</span>
+    </div>
+    <div class="modal-body">
+      <div class="picker-wheels">
+        <div class="picker-highlight"></div>
+        <div class="picker-col" id="wheelYear"></div>
+        <div class="picker-col" id="wheelMonth"></div>
+        <div class="picker-col" id="wheelDay"></div>
+        <div class="picker-unit unit-year">年</div>
+        <div class="picker-unit unit-month">月</div>
+        <div class="picker-unit unit-day">日</div>
+      </div>
+      <div class="picker-today-link" onclick="wheelGoToday()">回到今天</div>
+      <button class="btn-primary" onclick="confirmDatePicker()">确定</button>
     </div>
   </div>
 </div>
