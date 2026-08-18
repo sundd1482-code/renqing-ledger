@@ -1129,3 +1129,145 @@ body {
   margin-left: auto;
 }
 .batch-record-row .br-del:active { color: var(--primary); }
+
+/* ===== 日期显示栏（点击弹滚轮） ===== */
+.date-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  cursor: pointer;
+  background: var(--card);
+  transition: border-color 0.2s;
+}
+.date-display:active { border-color: var(--primary); }
+.date-display .date-value { font-size: 0.9rem; font-weight: 600; }
+.date-display .date-arrow { font-size: 1rem; }
+
+/* ===== 三列滚轮日期选择器 ===== */
+.picker-wheels {
+  display: flex;
+  position: relative;
+  height: 220px;
+  background: var(--bg);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.picker-col {
+  flex: 1;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  padding: 88px 0;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.picker-col::-webkit-scrollbar { display: none; }
+.picker-item {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.08rem;
+  color: var(--text-light);
+  scroll-snap-align: center;
+  user-select: none;
+  cursor: pointer;
+}
+.picker-item.active { color: var(--primary); font-weight: 700; font-size: 1.15rem; }
+.picker-highlight {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  right: 10px;
+  height: 44px;
+  transform: translateY(-50%);
+  border-top: 1.5px solid rgba(231,76,60,0.35);
+  border-bottom: 1.5px solid rgba(231,76,60,0.35);
+  background: rgba(231,76,60,0.05);
+  pointer-events: none;
+}
+.picker-unit {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
+  color: var(--text-light);
+  pointer-events: none;
+}
+.picker-unit.unit-year { left: calc(100%/3 - 50px); }
+.picker-unit.unit-month { left: calc(100%*2/3 - 54px); }
+.picker-unit.unit-day { right: 16px; }
+.picker-today-link {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--blue);
+  padding: 6px 0 12px;
+  cursor: pointer;
+}
+
+/* ===== 批量记礼金：来宾搜索下拉 ===== */
+.br-name-wrap { position: relative; flex: 2 1 80px; min-width: 0; }
+.br-name-wrap .br-name { width: 100%; }
+.guest-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  min-width: 140px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  z-index: 60;
+  overflow: hidden;
+}
+.gd-item {
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  background: #fff;
+}
+.gd-item:active { background: var(--bg); }
+.gd-item .gd-rel { color: var(--text-muted); font-size: 0.68rem; }
+.gd-item.gd-none { color: var(--text-muted); font-size: 0.75rem; justify-content: center; }
+
+/* ===== 分析页：明细记录列表 ===== */
+.detail-query-list { display: flex; flex-direction: column; gap: 8px; }
+.dq-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.dq-item:active { transform: scale(0.98); }
+.dq-date {
+  font-size: 0.66rem;
+  color: var(--text-light);
+  width: 62px;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+.dq-main { flex: 1; min-width: 0; }
+.dq-name { font-weight: 600; font-size: 0.88rem; }
+.dq-event { font-size: 0.7rem; color: var(--text-light); margin-left: 6px; font-weight: 400; }
+.dq-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dq-amount { font-weight: 700; font-size: 0.9rem; white-space: nowrap; }
+.dq-amount.out { color: var(--primary); }
+.dq-amount.in { color: var(--green); }
