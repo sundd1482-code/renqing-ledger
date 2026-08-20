@@ -1146,21 +1146,21 @@ body {
 .date-display .date-value { font-size: 0.9rem; font-weight: 600; }
 .date-display .date-arrow { font-size: 1rem; }
 
-/* ===== 三列滚轮日期选择器 ===== */
+/* ===== 单列滚轮日期选择器 ===== */
 .picker-wheels {
-  display: flex;
   position: relative;
-  height: 220px;
+  height: 264px;
   background: var(--bg);
   border-radius: 12px;
   overflow: hidden;
   margin-bottom: 6px;
 }
 .picker-col {
-  flex: 1;
+  height: 100%;
+  box-sizing: border-box;
   overflow-y: auto;
   scroll-snap-type: y mandatory;
-  padding: 88px 0;
+  padding: 110px 0;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
@@ -1170,13 +1170,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.08rem;
+  font-size: 1.02rem;
   color: var(--text-light);
   scroll-snap-align: center;
   user-select: none;
   cursor: pointer;
+  white-space: nowrap;
 }
-.picker-item.active { color: var(--primary); font-weight: 700; font-size: 1.15rem; }
+.picker-item.active { color: var(--primary); font-weight: 700; font-size: 1.12rem; }
+.picker-item.is-today:not(.active) { color: var(--blue); font-weight: 600; }
 .picker-highlight {
   position: absolute;
   top: 50%;
@@ -1189,17 +1191,6 @@ body {
   background: rgba(231,76,60,0.05);
   pointer-events: none;
 }
-.picker-unit {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 0.75rem;
-  color: var(--text-light);
-  pointer-events: none;
-}
-.picker-unit.unit-year { left: calc(100%/3 - 50px); }
-.picker-unit.unit-month { left: calc(100%*2/3 - 54px); }
-.picker-unit.unit-day { right: 16px; }
 .picker-today-link {
   text-align: center;
   font-size: 0.75rem;
