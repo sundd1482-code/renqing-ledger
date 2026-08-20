@@ -364,13 +364,15 @@ function initDatePicker(defaultYear, defaultMonth, defaultDay) {
 }
 
 /* ====== 滚轮日期选择器（记一笔 / 批量记礼金共用） ======
- * 点一下日期栏 → 底部弹出三列滚轮（年/月/日并排，同时可滑）→ 滑动选择 → 确定
- * 三列独立滚动互不干扰，年/月切换时自动重建"日"列并校正天数
+ * 点一下日期栏 → 弹出单列滚轮 → 上下滑动即可调整年月日 → 确定
+ * 每一项就是一个完整日期（X年X月X日 周X），滑到哪天就是哪天，无需分别选年/月/日
  */
 let selectedDate = '';            // 记一笔：当前日期 YYYY-MM-DD
 let batchDateValue = '';          // 批量记礼金：当前日期 YYYY-MM-DD
 let datePickerTarget = 'record';  // 'record' | 'batch' 当前弹窗服务于哪个场景
 let wheelScrollTimer = null;
+let wheelDateList = [];           // 单列滚轮的全部日期
+let wheelActiveIdx = -1;          // 当前高亮项索引
 const WHEEL_ITEM_H = 44;          // 滚轮单项高度(px)，与CSS .picker-item 保持一致
 
 function normalizeDate(s) {
@@ -408,120 +410,105 @@ function getSelectedDate() {
   return selectedDate;
 }
 
-/* 打开滚轮弹窗（target: 'record' 或 'batch'） */
+/* 'YYYY-MM-DD' → Date（本地时区，避免UTC偏移） */
+function keyToDate(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+function dateToKey(dt) {
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+}
+
+const WEEK_CN = ['周日','周一','周二','周三','周四','周五','周六'];
+
+/* 生成单列日期：默认 今天往前4年 ~ 往后1年；当前选中日期超出范围时自动扩展 */
+function buildWheelDateList(curKey) {
+  const now = new Date();
+  const start = new Date(now.getFullYear() - 4, now.getMonth(), now.getDate());
+  const end   = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
+  const nk = normalizeDate(curKey);
+  if (nk) {
+    const cur = keyToDate(nk);
+    if (cur < start) start.setTime(cur.getTime() - 30 * 86400000);
+    if (cur > end)   end.setTime(cur.getTime() + 30 * 86400000);
+  }
+  wheelDateList = [];
+  for (let t = new Date(start); t <= end; t.setDate(t.getDate() + 1)) {
+    wheelDateList.push(dateToKey(t));
+  }
+}
+
+/* 每项文案：2026年8月18日 周二 */
+function wheelItemLabel(key) {
+  const dt = keyToDate(key);
+  return `${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日 ${WEEK_CN[dt.getDay()]}`;
+}
+
+function setActiveWheelItem(idx) {
+  const col = document.getElementById('wheelSingle');
+  if (!col || !col.children[idx]) return;
+  if (wheelActiveIdx >= 0 && col.children[wheelActiveIdx]) col.children[wheelActiveIdx].classList.remove('active');
+  col.children[idx].classList.add('active');
+  wheelActiveIdx = idx;
+}
+
+/* 打开弹窗（target: 'record' 或 'batch'） */
 function openDatePicker(target) {
   datePickerTarget = target || 'record';
+  const cur = datePickerTarget === 'batch' ? (batchDateValue || todayStr()) : getSelectedDate();
+  buildWheelDateList(cur);
+  const col = document.getElementById('wheelSingle');
+  if (!col) return;
+  const today = todayStr();
+  col.innerHTML = wheelDateList.map(key =>
+    `<div class="picker-item${key === today ? ' is-today' : ''}" data-key="${key}">${wheelItemLabel(key)}${key === today ? ' ·今天' : ''}</div>`
+  ).join('');
+  col.onscroll = () => onSingleWheelScroll(col);
+  wheelActiveIdx = -1;
   document.getElementById('datePickerModal').classList.add('active');
-  setTimeout(() => {
-    const cur = datePickerTarget === 'batch' ? (batchDateValue || todayStr()) : getSelectedDate();
-    const [y, m, d] = cur.split('-').map(n => parseInt(n));
-    buildWheelCol('wheelYear', 'year', y);
-    buildWheelCol('wheelMonth', 'month', m);
-    buildWheelCol('wheelDay', 'day', d);
-    scrollWheelTo('wheelYear', y);
-    scrollWheelTo('wheelMonth', m);
-    scrollWheelTo('wheelDay', d);
-  }, 80);
+  setTimeout(() => scrollWheelToDate(cur, false), 80);
 }
 
 function closeDatePicker() {
   document.getElementById('datePickerModal').classList.remove('active');
 }
 
-/* 生成一列滚轮 */
-function buildWheelCol(id, type, selectedVal) {
-  const col = document.getElementById(id);
+/* 滚动到指定日期（居中） */
+function scrollWheelToDate(key, smooth) {
+  const col = document.getElementById('wheelSingle');
   if (!col) return;
-  let html = '';
-  const now = new Date();
-  if (type === 'year') {
-    for (let y = now.getFullYear() - 10; y <= now.getFullYear() + 1; y++) {
-      html += `<div class="picker-item${y === selectedVal ? ' active' : ''}" data-val="${y}">${y}</div>`;
-    }
-  } else if (type === 'month') {
-    for (let m = 1; m <= 12; m++) {
-      html += `<div class="picker-item${m === selectedVal ? ' active' : ''}" data-val="${m}">${m}</div>`;
-    }
-  } else {
-    const [y, m] = currentWheelYM();
-    const days = new Date(y, m, 0).getDate();
-    for (let d = 1; d <= days; d++) {
-      html += `<div class="picker-item${d === selectedVal ? ' active' : ''}" data-val="${d}">${d}</div>`;
-    }
-  }
-  col.innerHTML = html;
-  col.onscroll = () => onWheelScroll(col, type);
-}
-
-/* 滚动到指定值（居中） */
-function scrollWheelTo(id, val) {
-  const col = document.getElementById(id);
-  if (!col) return;
-  const items = col.querySelectorAll('.picker-item');
-  let idx = -1;
-  items.forEach(it => {
-    const v = parseInt(it.dataset.val);
-    it.classList.toggle('active', v === val);
-    if (v === val) idx = Array.from(items).indexOf(it);
-  });
-  if (idx >= 0) col.scrollTop = idx * WHEEL_ITEM_H;
+  let idx = wheelDateList.indexOf(normalizeDate(key));
+  if (idx < 0) idx = wheelDateList.indexOf(todayStr());
+  if (idx < 0) return;
+  setActiveWheelItem(idx);
+  col.scrollTo({ top: idx * WHEEL_ITEM_H, behavior: smooth ? 'smooth' : 'auto' });
 }
 
 /* 滚动停止后取居中项作为选中值 */
-function onWheelScroll(col, type) {
+function onSingleWheelScroll(col) {
   clearTimeout(wheelScrollTimer);
   wheelScrollTimer = setTimeout(() => {
-    const items = col.querySelectorAll('.picker-item');
-    const idx = Math.min(items.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
-    const item = items[idx];
-    if (!item) return;
-    items.forEach(it => it.classList.remove('active'));
-    item.classList.add('active');
-    // 年或月变化时，重建"日"列（天数联动），尽量保持原选中日
-    if (type === 'year' || type === 'month') {
-      const dayCol = document.getElementById('wheelDay');
-      const prevDay = dayCol ? (dayCol.querySelector('.picker-item.active') || {}).dataset?.val : null;
-      const [y, m] = currentWheelYM();
-      const days = new Date(y, m, 0).getDate();
-      const keep = Math.min(parseInt(prevDay || todayStr().split('-')[2]), days);
-      buildWheelCol('wheelDay', 'day', keep);
-      scrollWheelTo('wheelDay', keep);
-    }
-  }, 120);
+    const idx = Math.min(wheelDateList.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
+    setActiveWheelItem(idx);
+  }, 130);
 }
 
-/* 取滚轮当前年月 */
-function currentWheelYM() {
-  const yItem = document.querySelector('#wheelYear .picker-item.active');
-  const mItem = document.querySelector('#wheelMonth .picker-item.active');
-  const now = new Date();
-  const y = yItem ? parseInt(yItem.dataset.val) : now.getFullYear();
-  const m = mItem ? parseInt(mItem.dataset.val) : now.getMonth() + 1;
-  return [y, m];
-}
-
-/* 确认选择 */
+/* 确认选择（按当前停留位置取值，即使刚滑完立即点确定也不丢） */
 function confirmDatePicker() {
-  const yItem = document.querySelector('#wheelYear .picker-item.active');
-  const mItem = document.querySelector('#wheelMonth .picker-item.active');
-  const dItem = document.querySelector('#wheelDay .picker-item.active');
-  if (!yItem || !mItem || !dItem) { closeDatePicker(); return; }
-  const dateStr = `${yItem.dataset.val}-${String(mItem.dataset.val).padStart(2,'0')}-${String(dItem.dataset.val).padStart(2,'0')}`;
-  if (datePickerTarget === 'batch') setBatchDate(dateStr);
-  else setSelectedDate(dateStr);
+  const col = document.getElementById('wheelSingle');
+  let key = todayStr();
+  if (col) {
+    const idx = Math.min(wheelDateList.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
+    if (wheelDateList[idx]) key = wheelDateList[idx];
+  }
+  if (datePickerTarget === 'batch') setBatchDate(key);
+  else setSelectedDate(key);
   closeDatePicker();
 }
 
 /* 快捷：滚回今天 */
 function wheelGoToday() {
-  const [y, m, d] = todayStr().split('-').map(n => parseInt(n));
-  const [cy, cm] = currentWheelYM();
-  if (cy !== y || cm !== m) {
-    buildWheelCol('wheelDay', 'day', d);
-  }
-  scrollWheelTo('wheelYear', y);
-  scrollWheelTo('wheelMonth', m);
-  scrollWheelTo('wheelDay', d);
+  scrollWheelToDate(todayStr(), true);
 }
 
 
@@ -1355,21 +1342,19 @@ function saveBatchRecords() {
   const remark = document.getElementById('batchRemark').value.trim();
   if (!date) { toast('请选择日期'); return; }
 
-  const validRows = batchRows.filter(r => r.name.trim() && parseFloat(r.amount) > 0);
-  if (validRows.length === 0) { toast('请至少填写一行有效数据'); return; }
-
-  // 校验：所有来宾必须已在通讯录中（不自动创建）
-  const notFound = [];
-  validRows.forEach(row => {
-    const name = row.name.trim();
-    if (!DB.persons.find(p => p.name === name)) notFound.push(name);
-  });
-  if (notFound.length > 0) {
-    toast(`不在通讯录：${notFound.join('、')}。请先到通讯录添加后再记`);
+  // 校验：金额必须为数字且不能为负数
+  const invalidRows = batchRows.filter(r => r.amount !== '' && (isNaN(parseFloat(r.amount)) || parseFloat(r.amount) < 0));
+  if (invalidRows.length > 0) {
+    const bad = invalidRows[0];
+    const who = bad.name.trim() || `第 ${batchRows.indexOf(bad) + 1} 行`;
+    toast(`${who} 的金额无效，请输入正数`);
     return;
   }
 
-  let added = 0;
+  const validRows = batchRows.filter(r => r.name.trim() && r.amount !== '');
+  if (validRows.length === 0) { toast('请至少填写一行有效数据'); return; }
+
+  let added = 0, newPersons = 0;
   validRows.forEach(row => {
     const name = row.name.trim();
     const amount = parseFloat(row.amount);
@@ -1378,9 +1363,13 @@ function saveBatchRecords() {
     const rowRemark = row.note.trim();
     const finalRemark = rowRemark ? rowRemark : remark;
 
-    // 人员必须已存在（保存前已校验）
-    const person = DB.persons.find(p => p.name === name);
-    if (!person) return;
+    // 查找或创建人员（通讯录无则自动添加）
+    let person = DB.persons.find(p => p.name === name);
+    if (!person) {
+      person = { id: uuid(), name, relation: '朋友', phone: '', birthday: '', calType: 'solar', note: '批量记礼金时自动创建', createTime: Date.now() };
+      DB.persons.push(person);
+      newPersons++;
+    }
 
     const record = {
       id: uuid(),
