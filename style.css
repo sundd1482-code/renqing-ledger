@@ -1146,7 +1146,7 @@ body {
 .date-display .date-value { font-size: 0.9rem; font-weight: 600; }
 .date-display .date-arrow { font-size: 1rem; }
 
-/* ===== 单列滚轮日期选择器 ===== */
+/* ===== 三列滚轮日期选择器（年 / 月 / 日） ===== */
 .picker-wheels {
   position: relative;
   height: 264px;
@@ -1154,8 +1154,10 @@ body {
   border-radius: 12px;
   overflow: hidden;
   margin-bottom: 6px;
+  display: flex;
 }
-.picker-col {
+.picker-wheels .picker-col {
+  flex: 1;
   height: 100%;
   box-sizing: border-box;
   overflow-y: auto;
@@ -1164,7 +1166,7 @@ body {
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
-.picker-col::-webkit-scrollbar { display: none; }
+.picker-wheels .picker-col::-webkit-scrollbar { display: none; }
 .picker-item {
   height: 44px;
   display: flex;
@@ -1178,7 +1180,6 @@ body {
   white-space: nowrap;
 }
 .picker-item.active { color: var(--primary); font-weight: 700; font-size: 1.12rem; }
-.picker-item.is-today:not(.active) { color: var(--blue); font-weight: 600; }
 .picker-highlight {
   position: absolute;
   top: 50%;
