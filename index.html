@@ -126,6 +126,7 @@
       </div>
 
       <button class="btn-primary" id="saveRecordBtn" onclick="saveRecord()">保存记录</button>
+      <button class="btn-danger-outline hidden" id="deleteRecordBtn" onclick="deleteEditingRecord()" style="margin-top:10px;">删除记录</button>
     </div>
   </section>
 
@@ -623,7 +624,7 @@
   </div>
 </div>
 
-<!-- ========== 日期滚轮选择弹窗 ========== -->
+<!-- ========== 日期滚轮选择弹窗（年/月/日 三列） ========== -->
 <div class="modal-overlay" id="datePickerModal">
   <div class="modal">
     <div class="modal-header">
@@ -631,9 +632,11 @@
       <span class="modal-close" onclick="closeDatePicker()">✕</span>
     </div>
     <div class="modal-body">
-      <div class="picker-wheels">
+      <div class="picker-wheels picker-wheels-3">
         <div class="picker-highlight"></div>
-        <div class="picker-col" id="wheelSingle"></div>
+        <div class="picker-col" id="wheelYear"></div>
+        <div class="picker-col" id="wheelMonth"></div>
+        <div class="picker-col" id="wheelDay"></div>
       </div>
       <div class="picker-today-link" onclick="wheelGoToday()">回到今天</div>
       <button class="btn-primary" onclick="confirmDatePicker()">确定</button>
