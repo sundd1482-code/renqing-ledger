@@ -364,15 +364,13 @@ function initDatePicker(defaultYear, defaultMonth, defaultDay) {
 }
 
 /* ====== 滚轮日期选择器（记一笔 / 批量记礼金共用） ======
- * 点一下日期栏 → 弹出单列滚轮 → 上下滑动即可调整年月日 → 确定
- * 每一项就是一个完整日期（X年X月X日 周X），滑到哪天就是哪天，无需分别选年/月/日
+ * 点一下日期栏 → 弹出三列滚轮（年 / 月 / 日）→ 分别选择 → 确定
+ * 不显示周几；月、日联动，自动处理大小月与闰年
  */
 let selectedDate = '';            // 记一笔：当前日期 YYYY-MM-DD
 let batchDateValue = '';          // 批量记礼金：当前日期 YYYY-MM-DD
 let datePickerTarget = 'record';  // 'record' | 'batch' 当前弹窗服务于哪个场景
 let wheelScrollTimer = null;
-let wheelDateList = [];           // 单列滚轮的全部日期
-let wheelActiveIdx = -1;          // 当前高亮项索引
 const WHEEL_ITEM_H = 44;          // 滚轮单项高度(px)，与CSS .picker-item 保持一致
 
 function normalizeDate(s) {
@@ -419,88 +417,118 @@ function dateToKey(dt) {
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
 }
 
-const WEEK_CN = ['周日','周一','周二','周三','周四','周五','周六'];
+/* ===== 三列滚轮日期选择器（年 / 月 / 日 分别选择） ===== */
+const WHEEL_YEAR_START = 1900;
+const WHEEL_YEAR_END = 2100;
+let wheelYear = 0, wheelMonth = 0, wheelDay = 0;
 
-/* 生成单列日期：默认 今天往前4年 ~ 往后1年；当前选中日期超出范围时自动扩展 */
-function buildWheelDateList(curKey) {
-  const now = new Date();
-  const start = new Date(now.getFullYear() - 4, now.getMonth(), now.getDate());
-  const end   = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
-  const nk = normalizeDate(curKey);
-  if (nk) {
-    const cur = keyToDate(nk);
-    if (cur < start) start.setTime(cur.getTime() - 30 * 86400000);
-    if (cur > end)   end.setTime(cur.getTime() + 30 * 86400000);
-  }
-  wheelDateList = [];
-  for (let t = new Date(start); t <= end; t.setDate(t.getDate() + 1)) {
-    wheelDateList.push(dateToKey(t));
-  }
+function daysInMonth(y, m) {
+  return new Date(y, m, 0).getDate();
 }
 
-/* 每项文案：2026年8月18日 周二 */
-function wheelItemLabel(key) {
-  const dt = keyToDate(key);
-  return `${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日 ${WEEK_CN[dt.getDay()]}`;
+function buildWheelItems(colId, min, max, selected, suffix) {
+  const col = document.getElementById(colId);
+  if (!col) return;
+  let html = '';
+  for (let i = min; i <= max; i++) {
+    const active = i === selected ? ' active' : '';
+    html += `<div class="picker-item${active}" data-value="${i}">${i}${suffix || ''}</div>`;
+  }
+  col.innerHTML = html;
 }
 
-function setActiveWheelItem(idx) {
-  const col = document.getElementById('wheelSingle');
-  if (!col || !col.children[idx]) return;
-  if (wheelActiveIdx >= 0 && col.children[wheelActiveIdx]) col.children[wheelActiveIdx].classList.remove('active');
-  col.children[idx].classList.add('active');
-  wheelActiveIdx = idx;
+function scrollColTo(colId, value, smooth) {
+  const col = document.getElementById(colId);
+  if (!col || !col.children[0]) return;
+  const min = parseInt(col.children[0].dataset.value || 0);
+  const idx = value - min;
+  if (idx < 0 || idx >= col.children.length) return;
+  col.scrollTo({ top: idx * WHEEL_ITEM_H, behavior: smooth ? 'smooth' : 'auto' });
+}
+
+function getWheelValue(colId) {
+  const col = document.getElementById(colId);
+  if (!col || col.children.length === 0) return null;
+  const idx = Math.min(col.children.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
+  const el = col.children[idx];
+  return el ? parseInt(el.dataset.value) : null;
+}
+
+function setWheelHighlight(colId) {
+  const col = document.getElementById(colId);
+  if (!col) return;
+  const idx = Math.min(col.children.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
+  Array.from(col.children).forEach((el, i) => el.classList.toggle('active', i === idx));
+}
+
+/* 根据当前年月刷新“日”列（处理 2 月、大小月） */
+function refreshDayWheel() {
+  const maxDay = daysInMonth(wheelYear, wheelMonth);
+  if (wheelDay > maxDay) wheelDay = maxDay;
+  buildWheelItems('wheelDay', 1, maxDay, wheelDay, '日');
+  scrollColTo('wheelDay', wheelDay, false);
+}
+
+function onWheelScroll(colId, type) {
+  clearTimeout(wheelScrollTimer);
+  wheelScrollTimer = setTimeout(() => {
+    const val = getWheelValue(colId);
+    if (val === null) return;
+    if (type === 'year') wheelYear = val;
+    if (type === 'month') wheelMonth = val;
+    if (type === 'day') wheelDay = val;
+    setWheelHighlight(colId);
+    if (type === 'year' || type === 'month') refreshDayWheel();
+  }, 130);
+}
+
+function setWheelScrollHandlers() {
+  const yearCol = document.getElementById('wheelYear');
+  const monthCol = document.getElementById('wheelMonth');
+  const dayCol = document.getElementById('wheelDay');
+  if (yearCol) yearCol.onscroll = () => onWheelScroll('wheelYear', 'year');
+  if (monthCol) monthCol.onscroll = () => onWheelScroll('wheelMonth', 'month');
+  if (dayCol) dayCol.onscroll = () => onWheelScroll('wheelDay', 'day');
 }
 
 /* 打开弹窗（target: 'record' 或 'batch'） */
 function openDatePicker(target) {
   datePickerTarget = target || 'record';
   const cur = datePickerTarget === 'batch' ? (batchDateValue || todayStr()) : getSelectedDate();
-  buildWheelDateList(cur);
-  const col = document.getElementById('wheelSingle');
-  if (!col) return;
-  const today = todayStr();
-  col.innerHTML = wheelDateList.map(key =>
-    `<div class="picker-item${key === today ? ' is-today' : ''}" data-key="${key}">${wheelItemLabel(key)}${key === today ? ' ·今天' : ''}</div>`
-  ).join('');
-  col.onscroll = () => onSingleWheelScroll(col);
-  wheelActiveIdx = -1;
+  const [y, m, d] = cur.split('-').map(Number);
+  const now = new Date();
+  wheelYear = y || now.getFullYear();
+  wheelMonth = m || now.getMonth() + 1;
+  wheelDay = d || now.getDate();
+
+  buildWheelItems('wheelYear', WHEEL_YEAR_START, WHEEL_YEAR_END, wheelYear, '年');
+  buildWheelItems('wheelMonth', 1, 12, wheelMonth, '月');
+  refreshDayWheel();
+
   document.getElementById('datePickerModal').classList.add('active');
-  setTimeout(() => scrollWheelToDate(cur, false), 80);
+  setWheelScrollHandlers();
+  setTimeout(() => {
+    scrollColTo('wheelYear', wheelYear, false);
+    scrollColTo('wheelMonth', wheelMonth, false);
+    scrollColTo('wheelDay', wheelDay, false);
+    setWheelHighlight('wheelYear');
+    setWheelHighlight('wheelMonth');
+    setWheelHighlight('wheelDay');
+  }, 80);
 }
 
 function closeDatePicker() {
   document.getElementById('datePickerModal').classList.remove('active');
 }
 
-/* 滚动到指定日期（居中） */
-function scrollWheelToDate(key, smooth) {
-  const col = document.getElementById('wheelSingle');
-  if (!col) return;
-  let idx = wheelDateList.indexOf(normalizeDate(key));
-  if (idx < 0) idx = wheelDateList.indexOf(todayStr());
-  if (idx < 0) return;
-  setActiveWheelItem(idx);
-  col.scrollTo({ top: idx * WHEEL_ITEM_H, behavior: smooth ? 'smooth' : 'auto' });
-}
-
-/* 滚动停止后取居中项作为选中值 */
-function onSingleWheelScroll(col) {
-  clearTimeout(wheelScrollTimer);
-  wheelScrollTimer = setTimeout(() => {
-    const idx = Math.min(wheelDateList.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
-    setActiveWheelItem(idx);
-  }, 130);
-}
-
 /* 确认选择（按当前停留位置取值，即使刚滑完立即点确定也不丢） */
 function confirmDatePicker() {
-  const col = document.getElementById('wheelSingle');
-  let key = todayStr();
-  if (col) {
-    const idx = Math.min(wheelDateList.length - 1, Math.max(0, Math.round(col.scrollTop / WHEEL_ITEM_H)));
-    if (wheelDateList[idx]) key = wheelDateList[idx];
-  }
+  const y = getWheelValue('wheelYear') || wheelYear;
+  const m = getWheelValue('wheelMonth') || wheelMonth;
+  let d = getWheelValue('wheelDay') || wheelDay;
+  const maxDay = daysInMonth(y, m);
+  if (d > maxDay) d = maxDay;
+  const key = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   if (datePickerTarget === 'batch') setBatchDate(key);
   else setSelectedDate(key);
   closeDatePicker();
@@ -508,7 +536,19 @@ function confirmDatePicker() {
 
 /* 快捷：滚回今天 */
 function wheelGoToday() {
-  scrollWheelToDate(todayStr(), true);
+  const now = new Date();
+  wheelYear = now.getFullYear();
+  wheelMonth = now.getMonth() + 1;
+  wheelDay = now.getDate();
+  scrollColTo('wheelYear', wheelYear, true);
+  scrollColTo('wheelMonth', wheelMonth, true);
+  refreshDayWheel();
+  setTimeout(() => {
+    scrollColTo('wheelDay', wheelDay, true);
+    setWheelHighlight('wheelYear');
+    setWheelHighlight('wheelMonth');
+    setWheelHighlight('wheelDay');
+  }, 60);
 }
 
 
@@ -531,6 +571,9 @@ function resetForm() {
   // 隐藏保存按钮的编辑模式标记
   const saveBtn = document.getElementById('saveRecordBtn');
   if (saveBtn) saveBtn.textContent = '保存记录';
+  // 隐藏删除按钮（仅编辑模式显示）
+  const delBtn = document.getElementById('deleteRecordBtn');
+  if (delBtn) delBtn.classList.add('hidden');
 }
 
 // ====== 保存记录 ======
@@ -626,9 +669,11 @@ function editRecord(recordId) {
   setSelectedDate(r.date);
   // 显示已选中人员
   selectPersonFromDropdown(r.personId);
-  // 修改保存按钮文字
+  // 修改保存按钮文字，并显示删除按钮
   const saveBtn = document.getElementById('saveRecordBtn');
   if (saveBtn) saveBtn.textContent = '保存修改';
+  const delBtn = document.getElementById('deleteRecordBtn');
+  if (delBtn) delBtn.classList.remove('hidden');
 }
 
 // ====== 人员弹窗 ======
@@ -1085,6 +1130,26 @@ function deleteRecord(id) {
   renderContacts();
   renderMine();
   toast('已删除');
+}
+
+/* 在编辑页（记一笔）删除当前正在编辑的记录 */
+function deleteEditingRecord() {
+  if (!editingRecordId) return;
+  if (!confirm('确认删除这条记录？')) return;
+  const pid = window._accountPersonId;
+  DB.records = DB.records.filter(r => r.id !== editingRecordId);
+  saveData();
+  resetForm();
+  renderHome();
+  renderContacts();
+  renderMine();
+  toast('已删除');
+  if (pid) {
+    window._accountPersonId = null;
+    setTimeout(() => openAccount(pid), 100);
+  } else {
+    setTimeout(() => switchPage('home'), 300);
+  }
 }
 
 // ====== 渲染：我的 ======
@@ -2062,7 +2127,7 @@ function fmt(n) {
 
 function esc(s) {
   if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'<').replace(/>/g,'>').replace(/"/g,'&quot;');
 }
 
 function formatDate(dateStr) {
