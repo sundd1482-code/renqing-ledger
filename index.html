@@ -228,20 +228,20 @@
       </div>
     </div>
 
-    <!-- 月度趋势 -->
+    <!-- 人情往来排行 -->
     <div class="section">
-      <div class="section-title"><span>📈</span> 月度趋势</div>
-      <div id="analysisByMonth" class="analysis-table-wrap">
-        <!-- JS填充 -->
+      <div class="section-title"><span>🏆</span> 人情往来排行</div>
+      <div id="analysisRankList" class="rank-list">
+        <div class="empty-hint">暂无数据</div>
       </div>
     </div>
 
-    <!-- 明细记录查询 -->
+    <!-- 明细记录（近三天新增） -->
     <div class="section">
       <div class="section-title">
-        <span>📋</span> 明细记录
+        <span>📋</span> 近三天新增
         <span class="badge" id="detailCount">0</span>
-        <span class="muted" style="font-size:0.68rem; margin-left:auto; font-weight:400;">按当前筛选 · 点击可查看编辑</span>
+        <span class="muted" style="font-size:0.68rem; margin-left:auto; font-weight:400;">点击可查看编辑</span>
       </div>
       <div id="analysisDetails" class="detail-query-list">
         <!-- JS填充 -->
@@ -269,14 +269,6 @@
       <div class="section-title"><span>📊</span> 年度统计</div>
       <div class="stats-grid" id="statsGrid">
         <!-- JS填充 -->
-      </div>
-    </div>
-
-    <!-- 人情排行 -->
-    <div class="section">
-      <div class="section-title"><span>🏆</span> 人情往来排行</div>
-      <div id="rankList" class="rank-list">
-        <div class="empty-hint">暂无数据</div>
       </div>
     </div>
 
@@ -601,6 +593,7 @@
           <textarea id="syncCodeText" rows="6" readonly style="font-family:monospace; font-size:0.72rem; margin-top:8px; -webkit-user-select:text; user-select:text;"></textarea>
           <div style="display:flex; gap:8px; margin-top:8px;">
             <button class="btn-primary" onclick="copySyncCode()">📋 复制同步码</button>
+            <button class="btn-outline" onclick="shareSyncCode()">📤 分享</button>
             <button class="btn-outline" onclick="closeSyncModal()">完成</button>
           </div>
           <div id="syncCodeInfo" class="muted" style="text-align:center; margin-top:8px; font-size:0.72rem;"></div>
