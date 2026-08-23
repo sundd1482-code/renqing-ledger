@@ -608,6 +608,7 @@ function saveRecord() {
     r.gift = gift;
     r.location = location;
     r.remark = remark;
+    r.updateTime = Date.now();
     toast('记录已更新 ✓');
   } else {
     const record = {
@@ -777,6 +778,7 @@ function savePerson() {
     if (p) {
       const oldName = p.name;
       Object.assign(p, data);
+      p.updateTime = Date.now();
       // 同步更新记录中的姓名
       DB.records.forEach(r => { if (r.personId === editingPersonId) r.personName = name; });
     }
@@ -1665,6 +1667,10 @@ function openSyncModal() {
   document.getElementById('syncCodeResult').style.display = 'none';
   document.getElementById('syncImportResult').style.display = 'none';
   document.getElementById('importSyncCodeInput').value = '';
+  const ta = document.getElementById('syncCodeText');
+  if (ta) ta.value = '';
+  const btn = document.getElementById('generateSyncBtn');
+  if (btn) btn.textContent = '生成同步码';
   document.getElementById('syncModal').classList.add('active');
 }
 
@@ -1681,6 +1687,11 @@ function switchSyncTab(tab) {
 
 function generateSyncCode() {
   try {
+    // 先清空旧值，避免残留
+    const ta = document.getElementById('syncCodeText');
+    if (ta) ta.value = '';
+    document.getElementById('syncCodeResult').style.display = 'none';
+
     const exportData = {
       persons: DB.persons,
       records: DB.records,
@@ -1694,13 +1705,16 @@ function generateSyncCode() {
     const prefix = 'RQSYNC:';
     const fullCode = prefix + code;
 
-    document.getElementById('syncCodeText').value = fullCode;
+    ta.value = fullCode;
     const recordCount = DB.records.length;
     const personCount = DB.persons.length;
     const time = new Date().toLocaleString('zh-CN');
     document.getElementById('syncCodeInfo').textContent =
       `包含 ${personCount} 人 · ${recordCount} 笔记录 · 生成于 ${time}`;
     document.getElementById('syncCodeResult').style.display = '';
+    // 按钮文字改为“重新生成”，避免误以为没反应反复点
+    const btn = document.getElementById('generateSyncBtn');
+    if (btn) btn.textContent = '重新生成同步码';
     toast('同步码已生成 ✓');
   } catch(e) {
     console.error(e);
@@ -1709,8 +1723,17 @@ function generateSyncCode() {
 }
 
 function copySyncCode() {
-  const text = document.getElementById('syncCodeText').value;
-  copyText(text, '同步码已复制 ✓');
+  const ta = document.getElementById('syncCodeText');
+  if (!ta || !ta.value) { toast('请先生成同步码'); return; }
+  const text = ta.value;
+  // 先尝试现代 API
+  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast('同步码已复制 ✓'))
+      .catch(() => fallbackCopy(text, '同步码已复制 ✓'));
+  } else {
+    fallbackCopy(text, '同步码已复制 ✓');
+  }
 }
 
 function importSyncCode() {
@@ -1721,45 +1744,67 @@ function importSyncCode() {
   try {
     const prefix = 'RQSYNC:';
     let code = input;
-    if (code.startsWith(prefix)) code = code.substring(prefix.length);
+    // 兼容用户多次粘贴导致的前缀拼接：取最后一个 RQSYNC: 之后内容
+    const lastIdx = code.lastIndexOf(prefix);
+    if (lastIdx >= 0) code = code.substring(lastIdx + prefix.length);
     code = code.trim();
+    // 去掉可能混入的空白和换行，Base64 不含空白
+    code = code.replace(/\s+/g, '');
 
     const json = decodeURIComponent(escape(atob(code)));
     const data = JSON.parse(json);
 
-    if (!data.persons || !data.records) { toast('同步码格式不对'); return; }
+    if (!Array.isArray(data.persons) || !Array.isArray(data.records)) {
+      toast('同步码格式不对'); return;
+    }
 
-    // 智能合并
-    let newPersons = 0, newRecords = 0;
-    const existingPersonNames = DB.persons.map(p => p.name);
-    const existingRecordIds = DB.records.map(r => r.id);
+    // ====== 智能合并：按 id 比较，较新版本覆盖较旧 ======
+    const ts = obj => obj.updateTime || obj.createTime || 0;
+    let newPersons = 0, updPersons = 0;
+    let newRecords = 0, updRecords = 0;
 
-    // 合并人员（按 name 去重）
+    // 人员：优先按 id 匹配，其次按 name 匹配
+    const personById = new Map(DB.persons.map(p => [p.id, p]));
+    const personByName = new Map(DB.persons.map(p => [p.name, p]));
+
     data.persons.forEach(p => {
-      if (!existingPersonNames.includes(p.name)) {
-        // 确保有 id
-        if (!p.id) p.id = uuid();
+      if (!p.id) p.id = uuid();
+      const existById = personById.get(p.id);
+      const existByName = personByName.get(p.name);
+      const exist = existById || existByName;
+      if (!exist) {
         DB.persons.push(p);
-        existingPersonNames.push(p.name);
+        personById.set(p.id, p);
+        personByName.set(p.name, p);
         newPersons++;
+      } else if (ts(p) > ts(exist)) {
+        // 较新版本覆盖，保留本地 id
+        const id = exist.id;
+        Object.assign(exist, p, { id });
+        updPersons++;
       }
     });
 
-    // 合并记录（按 id 去重）
+    // 记录：按 id 合并，较新覆盖较旧
+    const recordById = new Map(DB.records.map(r => [r.id, r]));
     data.records.forEach(r => {
-      if (!existingRecordIds.includes(r.id)) {
-        if (!r.id) r.id = uuid();
+      if (!r.id) r.id = uuid();
+      const exist = recordById.get(r.id);
+      if (!exist) {
         DB.records.push(r);
-        existingRecordIds.push(r.id);
+        recordById.set(r.id, r);
         newRecords++;
+      } else if (ts(r) > ts(exist)) {
+        Object.assign(exist, r, { id: exist.id });
+        updRecords++;
       }
     });
 
     // 合并家庭成员
     if (data.family && DB.family) {
-      data.family.members.forEach(m => {
-        if (!DB.family.members.includes(m)) DB.family.members.push(m);
-      });
+      const memSet = new Set(DB.family.members || []);
+      (data.family.members || []).forEach(m => memSet.add(m));
+      DB.family.members = Array.from(memSet);
     } else if (data.family && !DB.family) {
       DB.family = { ...data.family };
     }
@@ -1772,14 +1817,18 @@ function importSyncCode() {
     renderFamilyPanel();
 
     resultDiv.style.display = '';
+    const hasUpd = updPersons > 0 || updRecords > 0;
     resultDiv.innerHTML = `
       <div class="batch-tips" style="background:var(--green-bg);">
         ✅ 导入完成！<br>
         新增 ${newPersons} 位人员，${newRecords} 笔记录。<br>
-        ${newPersons === 0 && newRecords === 0 ? '（数据已是最新，无新增）' : ''}
+        ${hasUpd ? `更新 ${updPersons} 位人员、${updRecords} 笔记录（以较新版本为准）。` : ''}
+        ${newPersons === 0 && newRecords === 0 && !hasUpd ? '（数据已是最新，无变化）' : ''}
       </div>
     `;
-    toast(`导入成功：新增 ${newPersons} 人、${newRecords} 笔记录 ✓`);
+    toast(`导入成功：新增 ${newPersons} 人 / ${newRecords} 笔，更新 ${updPersons} 人 / ${updRecords} 笔 ✓`);
+    // 清空输入框，避免重复导入
+    document.getElementById('importSyncCodeInput').value = '';
   } catch(e) {
     console.error(e);
     toast('同步码格式不对，请检查');
@@ -1798,14 +1847,38 @@ function copyText(text, msg) {
 }
 
 function fallbackCopy(text, msg) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.left = '-9999px';
-  document.body.appendChild(ta);
-  ta.select();
-  try { document.execCommand('copy'); toast(msg); } catch(e) { toast('复制失败，请手动复制'); }
-  document.body.removeChild(ta);
+  // iOS Safari / PWA 下用可见 textarea 更可靠
+  const ta = document.getElementById('syncCodeText');
+  let created = false;
+  let target = ta;
+  if (!target) {
+    target = document.createElement('textarea');
+    target.value = text;
+    target.style.position = 'fixed';
+    target.style.left = '0';
+    target.style.top = '0';
+    target.style.width = '1px';
+    target.style.height = '1px';
+    target.style.opacity = '0';
+    document.body.appendChild(target);
+    created = true;
+  } else {
+    target.value = text;
+    target.removeAttribute('readonly');
+    target.style.userSelect = 'text';
+    target.style.webkitUserSelect = 'text';
+  }
+  target.focus();
+  target.select();
+  target.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch(e) { ok = false; }
+  if (created) {
+    document.body.removeChild(target);
+  } else {
+    target.setAttribute('readonly', '');
+  }
+  toast(ok ? msg : '复制失败，请长按文字框手动复制');
 }
 
 // ====== 导出Excel ======
