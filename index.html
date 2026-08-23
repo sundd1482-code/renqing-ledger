@@ -593,12 +593,12 @@
           💡 将当前账本数据编码为一段文字，发给家人即可。<br>
           家人点「导入同步码」→ 粘贴 → 数据自动合并。
         </div>
-        <button class="btn-primary" onclick="generateSyncCode()">生成同步码</button>
+        <button class="btn-primary" id="generateSyncBtn" onclick="generateSyncCode()">生成同步码</button>
         <div id="syncCodeResult" style="display:none; margin-top:16px;">
           <div class="batch-tips" style="background:var(--green-bg);">
-            ✅ 同步码已生成，复制下方文字发给家人：
+            ✅ 同步码已生成，点「复制同步码」或长按下方文字框手动复制：
           </div>
-          <textarea id="syncCodeText" rows="6" readonly style="font-family:monospace; font-size:0.72rem; margin-top:8px;"></textarea>
+          <textarea id="syncCodeText" rows="6" readonly style="font-family:monospace; font-size:0.72rem; margin-top:8px; -webkit-user-select:text; user-select:text;"></textarea>
           <div style="display:flex; gap:8px; margin-top:8px;">
             <button class="btn-primary" onclick="copySyncCode()">📋 复制同步码</button>
             <button class="btn-outline" onclick="closeSyncModal()">完成</button>
@@ -611,11 +611,11 @@
       <div id="syncImportPanel" style="display:none;">
         <div class="batch-tips">
           💡 粘贴家人发来的同步码，数据将智能合并到当前账本。<br>
-          已有的记录不会重复，新记录自动加入。
+          相同记录自动以较新版本为准，不会重复。
         </div>
         <div class="form-group">
           <label>粘贴同步码</label>
-          <textarea id="importSyncCodeInput" rows="6" placeholder="粘贴家人发来的同步码…" style="font-family:monospace; font-size:0.72rem;"></textarea>
+          <textarea id="importSyncCodeInput" rows="6" placeholder="粘贴家人发来的同步码…" style="font-family:monospace; font-size:0.72rem; -webkit-user-select:text; user-select:text;"></textarea>
         </div>
         <button class="btn-primary" onclick="importSyncCode()">导入并合并</button>
         <div id="syncImportResult" style="display:none; margin-top:12px;"></div>
