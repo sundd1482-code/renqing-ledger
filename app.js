@@ -1197,25 +1197,6 @@ function renderMine() {
       <div class="s-label">累计收到</div>
     </div>
   `;
-
-  // 排行：按总往来额排序
-  const personRanks = DB.persons.map(p => {
-    const s = getPersonStats(p.id);
-    return { person: p, total: s.totalOut + s.totalIn, ...s };
-  }).filter(x => x.total > 0).sort((a, b) => b.total - a.total).slice(0, 10);
-
-  const rankList = document.getElementById('rankList');
-  if (personRanks.length === 0) {
-    rankList.innerHTML = '<div class="empty-hint">暂无数据</div>';
-  } else {
-    rankList.innerHTML = personRanks.map((r, i) => `
-      <div class="rank-item">
-        <div class="rank-num">${i + 1}</div>
-        <div class="r-name">${r.person.name}</div>
-        <div class="r-val" style="color:var(--primary)">¥${fmt(r.total)}</div>
-      </div>
-    `).join('');
-  }
 }
 
 // ====== 批量添加人员 ======
@@ -1692,10 +1673,22 @@ function generateSyncCode() {
     if (ta) ta.value = '';
     document.getElementById('syncCodeResult').style.display = 'none';
 
+    // 导出精简数据：去掉冗余字段，缩短同步码长度
     const exportData = {
-      persons: DB.persons,
-      records: DB.records,
-      family: DB.family ? { ...DB.family } : null,
+      persons: DB.persons.map(p => ({
+        id: p.id, name: p.name, relation: p.relation,
+        phone: p.phone || '', birthday: p.birthday || '',
+        calType: p.calType || 'solar', note: p.note || '',
+        createTime: p.createTime || 0, updateTime: p.updateTime || 0
+      })),
+      records: DB.records.map(r => ({
+        id: r.id, personId: r.personId, personName: r.personName,
+        type: r.type, eventType: r.eventType, amount: r.amount,
+        date: r.date, gift: r.gift || '', location: r.location || '',
+        remark: r.remark || '', operator: r.operator || '',
+        createTime: r.createTime || 0, updateTime: r.updateTime || 0
+      })),
+      family: DB.family ? { code: DB.family.code, myName: DB.family.myName, members: DB.family.members || [] } : null,
       exportTime: new Date().toISOString(),
       exportName: DB.family ? DB.family.myName : '未知'
     };
@@ -1710,7 +1703,7 @@ function generateSyncCode() {
     const personCount = DB.persons.length;
     const time = new Date().toLocaleString('zh-CN');
     document.getElementById('syncCodeInfo').textContent =
-      `包含 ${personCount} 人 · ${recordCount} 笔记录 · 生成于 ${time}`;
+      `包含 ${personCount} 人 · ${recordCount} 笔记录 · 生成于 ${time} · 长度 ${fullCode.length} 字符`;
     document.getElementById('syncCodeResult').style.display = '';
     // 按钮文字改为“重新生成”，避免误以为没反应反复点
     const btn = document.getElementById('generateSyncBtn');
@@ -1726,13 +1719,34 @@ function copySyncCode() {
   const ta = document.getElementById('syncCodeText');
   if (!ta || !ta.value) { toast('请先生成同步码'); return; }
   const text = ta.value;
-  // 先尝试现代 API
-  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
-    navigator.clipboard.writeText(text)
-      .then(() => toast('同步码已复制 ✓'))
-      .catch(() => fallbackCopy(text, '同步码已复制 ✓'));
+  // 直接用 textarea 全选 + execCommand，iOS PWA 下最可靠
+  ta.removeAttribute('readonly');
+  ta.style.userSelect = 'text';
+  ta.style.webkitUserSelect = 'text';
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch(e) { ok = false; }
+  ta.setAttribute('readonly', '');
+  if (ok) {
+    toast('已复制，可粘贴到微信发给家人 ✓');
   } else {
-    fallbackCopy(text, '同步码已复制 ✓');
+    toast('复制失败，请长按文字框→全选→复制');
+  }
+}
+
+/* 分享同步码：走系统分享面板，绕过剪贴板限制 */
+function shareSyncCode() {
+  const ta = document.getElementById('syncCodeText');
+  if (!ta || !ta.value) { toast('请先生成同步码'); return; }
+  const text = ta.value;
+  if (navigator.share) {
+    navigator.share({ title: '人情账本同步码', text: text })
+      .catch(() => toast('已取消分享'));
+  } else {
+    // 不支持系统分享，回退到复制
+    copySyncCode();
   }
 }
 
@@ -2342,32 +2356,48 @@ function renderAnalysis() {
       }).join('')}
     </tbody></table>`;
 
-  // 月度趋势
-  const monthStats = {};
-  records.forEach(r => {
-    const month = r.date.slice(0, 7); // YYYY-MM
-    if (!monthStats[month]) monthStats[month] = { out: 0, in: 0, count: 0 };
-    if (r.type === 'out') monthStats[month].out += r.amount;
-    else monthStats[month].in += r.amount;
-    monthStats[month].count++;
-  });
-  const monthRows = Object.entries(monthStats).sort((a, b) => a[0].localeCompare(b[0]));
-  document.getElementById('analysisByMonth').innerHTML = monthRows.length === 0
-    ? '<div class="empty-hint">暂无数据</div>'
-    : `<table class="analysis-table"><thead><tr><th>月份</th><th>送出</th><th>收到</th><th>笔数</th></tr></thead><tbody>
-      ${monthRows.map(([month, s]) => `<tr><td>${month}</td><td class="red">¥${fmt(s.out)}</td><td class="green">¥${fmt(s.in)}</td><td>${s.count}</td></tr>`).join('')}
-    </tbody></table>`;
+  // ===== 人情往来排行（送出 / 收到 分开，不累加）=====
+  const rankList = document.getElementById('analysisRankList');
+  if (rankList) {
+    const personOut = [], personIn = [];
+    DB.persons.forEach(p => {
+      const s = getPersonStats(p.id);
+      if (s.totalOut > 0) personOut.push({ name: p.name, val: s.totalOut });
+      if (s.totalIn > 0) personIn.push({ name: p.name, val: s.totalIn });
+    });
+    personOut.sort((a, b) => b.val - a.val);
+    personIn.sort((a, b) => b.val - a.val);
+    const topOut = personOut.slice(0, 5);
+    const topIn = personIn.slice(0, 5);
+    const renderItem = (arr, color, label) => arr.length === 0
+      ? `<div class="empty-hint" style="padding:10px 0;">暂无${label}数据</div>`
+      : arr.map((r, i) => `
+        <div class="rank-item">
+          <div class="rank-num">${i + 1}</div>
+          <div class="r-name">${esc(r.name)}</div>
+          <div class="r-val" style="color:${color}">¥${fmt(r.val)}</div>
+        </div>`).join('');
+    rankList.innerHTML = `
+      <div style="font-size:0.78rem; font-weight:600; color:var(--primary); margin-bottom:6px;">送出排行 TOP5</div>
+      ${renderItem(topOut, 'var(--primary)', '送出')}
+      <div style="font-size:0.78rem; font-weight:600; color:var(--green); margin:12px 0 6px;">收到排行 TOP5</div>
+      ${renderItem(topIn, 'var(--green)', '收到')}
+    `;
+  }
 
-  // ===== 明细记录（跟随当前时间范围+关系筛选，时间倒序，点击查看/编辑）=====
+  // ===== 明细记录：仅近三天新增（按 createTime 倒序）=====
   const detailList = document.getElementById('analysisDetails');
   const detailCountEl = document.getElementById('detailCount');
   if (detailList) {
-    const sorted = [...records].sort((a, b) =>
-      b.date.localeCompare(a.date) || (b.createTime || 0) - (a.createTime || 0)
+    const now = Date.now();
+    const threeDaysAgo = now - 3 * 86400000;
+    const recent = DB.records.filter(r => (r.createTime || 0) >= threeDaysAgo);
+    const sorted = [...recent].sort((a, b) =>
+      (b.createTime || 0) - (a.createTime || 0) || b.date.localeCompare(a.date)
     );
     if (detailCountEl) detailCountEl.textContent = sorted.length;
     detailList.innerHTML = sorted.length === 0
-      ? '<div class="empty-hint">暂无记录</div>'
+      ? '<div class="empty-hint">近三天无新增记录</div>'
       : sorted.map(r => {
           const p = DB.persons.find(x => x.id === r.personId);
           const eObj = EVENT_TYPES.find(e => e.key === r.eventType);
