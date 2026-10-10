@@ -185,6 +185,96 @@ function loadData() {
   if (!DB.persons) DB.persons = [];
   if (!DB.records) DB.records = [];
   if (!DB.family) DB.family = null;
+  if (!DB.syncMeta) DB.syncMeta = { lastIncrementalSyncTime: 0 };
+  repairRecordPersonIds();
+}
+
+/* 姓名标准化：去所有空白、统一全角/半角括号与标点，用于宽松匹配 */
+function normName(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/\s+/g, '')
+    .replace(/[（(]/g, '(')
+    .replace(/[）)]/g, ')')
+    .replace(/[，,、]/g, ',')
+    .replace(/[．.]/g, '.')
+    .trim();
+}
+
+/* 数据自愈：修复记录与人员的关联关系
+ * 1) personId 失效但姓名能匹配 → 重新挂到正确人员
+ * 2) 姓名也匹配不到 → 自动补建人员档案（否则该笔往来只计入综合统计，不进通讯录）
+ * 解决「通讯录往来全为 0，但综合统计有数据」的问题 */
+function repairRecordPersonIds() {
+  if (!DB.records || !DB.records.length) return 0;
+  if (!DB.persons) DB.persons = [];
+  const byId = new Map(DB.persons.map(p => [p.id, p]));
+  const byName = new Map();
+  DB.persons.forEach(p => {
+    const k = normName(p.name);
+    if (k && !byName.has(k)) byName.set(k, p);
+  });
+  let fixed = 0;
+  DB.records.forEach(r => {
+    // 已正确关联则跳过
+    if (r.personId && byId.has(r.personId)) return;
+    const key = normName(r.personName);
+    if (!key) return;
+    // 优先按标准化姓名找已有人员
+    let target = byName.get(key);
+    if (!target) {
+      // 找不到就补建档案，否则这笔往来永远进不了通讯录
+      target = {
+        id: uuid(),
+        name: String(r.personName).trim(),
+        relation: '朋友',
+        phone: '',
+        birthday: '',
+        calType: 'solar',
+        note: '按往来记录自动补齐',
+        createTime: r.createTime || Date.now()
+      };
+      DB.persons.push(target);
+      byId.set(target.id, target);
+      byName.set(key, target);
+    }
+    r.personId = target.id;
+    r.personName = target.name;
+    fixed++;
+  });
+  if (fixed > 0) {
+    console.log(`[数据自愈] 已修复 ${fixed} 笔记录的关联人员`);
+    saveData();
+  }
+  return fixed;
+}
+
+/* 手动触发修复（「我的」页提供按钮），并返回修复结果 */
+function repairDataManually() {
+  const fixed = repairRecordPersonIds();
+  // 兜底：仍然找不到人员的记录（姓名为空等极端情况）
+  const byId = new Set(DB.persons.map(p => p.id));
+  const byName = new Map(DB.persons.map(p => [normName(p.name), p]));
+  let created = 0;
+  DB.records.forEach(r => {
+    if (r.personId && byId.has(r.personId)) return;
+    const k = normName(r.personName);
+    if (!k) return;
+    const p = { id: uuid(), name: r.personName, relation: '朋友', phone: '', birthday: '', calType: 'solar', note: '按记录自动补齐', createTime: Date.now() };
+    DB.persons.push(p);
+    byName.set(k, p);
+    r.personId = p.id;
+    created++;
+  });
+  if (fixed > 0 || created > 0) {
+    saveData();
+    initPersonSelect();
+    renderContacts();
+    renderHome();
+    renderMine();
+  }
+  toast(`已修复 ${fixed} 笔关联，补齐 ${created} 位人员 ✓`);
+  return { fixed, created };
 }
 
 function saveData() {
@@ -824,10 +914,28 @@ function deletePerson() {
 
 // ====== 筛选标签 ======
 function initFilterTabs() {
-  document.querySelectorAll('.filter-tab').forEach(tab => {
+  renderFilterTabs();
+  bindFilterTabs();
+}
+
+/* 动态生成关系筛选 tabs：基础5类 + 人员中实际存在的其他关系 */
+function renderFilterTabs() {
+  const wrap = document.getElementById('filterTabs');
+  if (!wrap) return;
+  const baseRels = ['亲戚','朋友','同事','邻居','长辈'];
+  const extraRels = Array.from(new Set(DB.persons.map(p => p.relation).filter(r => r && !baseRels.includes(r))));
+  const rels = ['all', ...baseRels, ...extraRels];
+  const labels = { all: '全部' };
+  wrap.innerHTML = rels.map(rel =>
+    `<div class="filter-tab${currentFilter === rel ? ' active' : ''}" data-rel="${esc(rel)}">${labels[rel] || esc(rel)}</div>`
+  ).join('');
+}
+
+function bindFilterTabs() {
+  document.querySelectorAll('#filterTabs .filter-tab').forEach(tab => {
     tab.onclick = () => {
       currentFilter = tab.dataset.rel;
-      document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#filterTabs .filter-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       renderContacts();
     };
@@ -836,7 +944,12 @@ function initFilterTabs() {
 
 // ====== 计算人员统计 ======
 function getPersonStats(personId) {
-  const records = DB.records.filter(r => r.personId === personId);
+  const person = DB.persons.find(p => p.id === personId);
+  const nk = person ? normName(person.name) : '';
+  // 优先按 id 匹配；同时兼容历史数据里 personId 失效但姓名一致的情况
+  const records = DB.records.filter(r =>
+    r.personId === personId || (nk && normName(r.personName) === nk)
+  );
   let totalOut = 0, totalIn = 0;
   records.forEach(r => {
     if (r.type === 'out') totalOut += r.amount;
@@ -936,6 +1049,9 @@ function renderReminders() {
 
 // ====== 渲染：通讯录 ======
 function renderContacts() {
+  // 刷新关系筛选 tabs（含导入的自定义关系）
+  renderFilterTabs();
+  bindFilterTabs();
   const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
   let persons = DB.persons;
 
@@ -995,8 +1111,9 @@ function openAccount(personId) {
   const person = DB.persons.find(p => p.id === personId);
   if (!person) return;
 
+  const nk = normName(person.name);
   const records = DB.records
-    .filter(r => r.personId === personId)
+    .filter(r => r.personId === personId || (nk && normName(r.personName) === nk))
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const stats = getPersonStats(personId);
@@ -1224,8 +1341,8 @@ function saveBatchPersons() {
     if (!name) { skipped++; return; }
     if (existingNames.includes(name)) { skipped++; return; }
     let relation = uniformRel || parts[1] || '朋友';
-    const validRels = ['亲戚','朋友','同事','邻居','长辈'];
-    if (!validRels.includes(relation)) relation = '朋友';
+    // 保留用户填写的任意关系值（与 Excel 导入保持一致），空才默认"朋友"
+    relation = relation.toString().replace(/\s+/g, '').trim() || '朋友';
     let birthday = '', calType = 'solar';
     if (parts[2]) {
       const rawBirth = parts[2];
@@ -1647,12 +1764,22 @@ function openSyncModal() {
   switchSyncTab('export');
   document.getElementById('syncCodeResult').style.display = 'none';
   document.getElementById('syncImportResult').style.display = 'none';
+  document.getElementById('syncQrWrap').style.display = 'none';
+  document.getElementById('syncCodeWarn').style.display = 'none';
   document.getElementById('importSyncCodeInput').value = '';
   const ta = document.getElementById('syncCodeText');
   if (ta) ta.value = '';
   const btn = document.getElementById('generateSyncBtn');
   if (btn) btn.textContent = '生成同步码';
   document.getElementById('syncModal').classList.add('active');
+}
+
+function updateSyncMode() {
+  // 选择全量模式时给提示（直接由 select onchange 触发）
+  const mode = getSyncMode();
+  if (mode === 'full') {
+    toast('全量模式：数据量大会导致同步码很长');
+  }
 }
 
 function closeSyncModal() {
@@ -1666,48 +1793,95 @@ function switchSyncTab(tab) {
   document.getElementById('syncImportPanel').style.display = tab === 'import' ? '' : 'none';
 }
 
+function getSyncMode() {
+  const el = document.querySelector('input[name="syncMode"]:checked');
+  return el ? el.value : 'incremental';
+}
+
+function getSyncRange() {
+  const el = document.querySelector('input[name="syncRange"]:checked');
+  return el ? el.value : 'all';
+}
+
+function buildSyncData(mode, range) {
+  // mode: 'incremental' | 'full'
+  // range: 'all' | '7d' | '30d' | 'thisYear' | 'lastYear'
+  const now = Date.now();
+  const cutoffByRange = {
+    all: 0,
+    '7d': now - 7 * 86400000,
+    '30d': now - 30 * 86400000,
+    thisYear: new Date(new Date().getFullYear(), 0, 1).getTime(),
+    lastYear: new Date(new Date().getFullYear() - 1, 0, 1).getTime()
+  };
+  const cutoff = cutoffByRange[range] || 0;
+  const lastSyncTime = (DB.syncMeta && DB.syncMeta.lastIncrementalSyncTime) || 0;
+  const baseTime = mode === 'incremental' ? Math.max(cutoff, lastSyncTime) : cutoff;
+
+  const persons = DB.persons.filter(p => (p.updateTime || p.createTime || 0) >= baseTime);
+  const records = DB.records.filter(r => (r.updateTime || r.createTime || 0) >= baseTime);
+
+  return {
+    mode,
+    range,
+    persons: persons.map(p => ({
+      id: p.id, name: p.name, relation: p.relation,
+      phone: p.phone || '', birthday: p.birthday || '',
+      calType: p.calType || 'solar', note: p.note || '',
+      createTime: p.createTime || 0, updateTime: p.updateTime || 0
+    })),
+    records: records.map(r => ({
+      id: r.id, personId: r.personId, personName: r.personName,
+      type: r.type, eventType: r.eventType, amount: r.amount,
+      date: r.date, gift: r.gift || '', location: r.location || '',
+      remark: r.remark || '', operator: r.operator || '',
+      createTime: r.createTime || 0, updateTime: r.updateTime || 0
+    })),
+    family: DB.family ? { code: DB.family.code, myName: DB.family.myName, members: DB.family.members || [] } : null,
+    exportTime: new Date().toISOString(),
+    exportName: DB.family ? DB.family.myName : '未知',
+    baseTime
+  };
+}
+
 function generateSyncCode() {
   try {
-    // 先清空旧值，避免残留
     const ta = document.getElementById('syncCodeText');
     if (ta) ta.value = '';
+    const qrWrap = document.getElementById('syncQrWrap');
+    if (qrWrap) qrWrap.style.display = 'none';
     document.getElementById('syncCodeResult').style.display = 'none';
 
-    // 导出精简数据：去掉冗余字段，缩短同步码长度
-    const exportData = {
-      persons: DB.persons.map(p => ({
-        id: p.id, name: p.name, relation: p.relation,
-        phone: p.phone || '', birthday: p.birthday || '',
-        calType: p.calType || 'solar', note: p.note || '',
-        createTime: p.createTime || 0, updateTime: p.updateTime || 0
-      })),
-      records: DB.records.map(r => ({
-        id: r.id, personId: r.personId, personName: r.personName,
-        type: r.type, eventType: r.eventType, amount: r.amount,
-        date: r.date, gift: r.gift || '', location: r.location || '',
-        remark: r.remark || '', operator: r.operator || '',
-        createTime: r.createTime || 0, updateTime: r.updateTime || 0
-      })),
-      family: DB.family ? { code: DB.family.code, myName: DB.family.myName, members: DB.family.members || [] } : null,
-      exportTime: new Date().toISOString(),
-      exportName: DB.family ? DB.family.myName : '未知'
-    };
-    const json = JSON.stringify(exportData);
-    // Base64 编码
+    const mode = getSyncMode();
+    const range = getSyncRange();
+    const data = buildSyncData(mode, range);
+    const json = JSON.stringify(data);
     const code = btoa(unescape(encodeURIComponent(json)));
     const prefix = 'RQSYNC:';
     const fullCode = prefix + code;
 
+    if (fullCode.length > 2900) {
+      // 超过 QR 容量上限，提示用户
+      const warn = document.getElementById('syncCodeWarn');
+      if (warn) {
+        warn.style.display = '';
+        warn.textContent = `⚠️ 长度 ${fullCode.length} 字符，超过二维码容量（约 2900）。建议改用「我的 → 数据管理 → 备份数据」导出 JSON 文件发给家人，对方用「导入备份」。`;
+      }
+    } else {
+      const warn = document.getElementById('syncCodeWarn');
+      if (warn) warn.style.display = 'none';
+    }
+
     ta.value = fullCode;
-    const recordCount = DB.records.length;
-    const personCount = DB.persons.length;
-    const time = new Date().toLocaleString('zh-CN');
+    const rangeLabel = { all:'全部', '7d':'最近7天', '30d':'最近30天', thisYear:'今年', lastYear:'去年' }[range] || range;
+    const modeLabel = mode === 'incremental' ? '增量' : '全量';
     document.getElementById('syncCodeInfo').textContent =
-      `包含 ${personCount} 人 · ${recordCount} 笔记录 · 生成于 ${time} · 长度 ${fullCode.length} 字符`;
+      `${modeLabel}模式 · ${rangeLabel} · 含 ${data.persons.length} 人 / ${data.records.length} 笔 · 长度 ${fullCode.length} 字符`;
     document.getElementById('syncCodeResult').style.display = '';
-    // 按钮文字改为“重新生成”，避免误以为没反应反复点
     const btn = document.getElementById('generateSyncBtn');
     if (btn) btn.textContent = '重新生成同步码';
+    // 生成二维码
+    renderSyncQrCode(fullCode);
     toast('同步码已生成 ✓');
   } catch(e) {
     console.error(e);
@@ -1715,11 +1889,51 @@ function generateSyncCode() {
   }
 }
 
+function renderSyncQrCode(text) {
+  const wrap = document.getElementById('syncQrWrap');
+  const img = document.getElementById('syncQrImg');
+  if (!wrap || !img) return;
+  if (!text || text.length > 2900) {
+    wrap.style.display = 'none';
+    return;
+  }
+  // 使用 qrcode-generator CDN
+  const qr = qrcode(0, 'L');
+  qr.addData(text);
+  qr.make();
+  // 创建 SVG 字符串
+  const cellSize = 4;
+  const margin = 2;
+  const count = qr.getModuleCount();
+  const size = count * cellSize + margin * 2 * cellSize;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`;
+  svg += `<rect width="${size}" height="${size}" fill="#fff"/>`;
+  for (let r = 0; r < count; r++) {
+    for (let c = 0; c < count; c++) {
+      if (qr.isDark(r, c)) {
+        const x = margin * cellSize + c * cellSize;
+        const y = margin * cellSize + r * cellSize;
+        svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="#2c3e50"/>`;
+      }
+    }
+  }
+  svg += '</svg>';
+  img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+  wrap.style.display = '';
+}
+
+/* 保存二维码到相册（iOS Safari 走长按图片保存） */
+function saveSyncQr() {
+  const img = document.getElementById('syncQrImg');
+  if (!img || !img.src) return;
+  // 长按图片即可保存；这里只提示
+  toast('长按二维码图片即可保存或分享 ✓');
+}
+
 function copySyncCode() {
   const ta = document.getElementById('syncCodeText');
   if (!ta || !ta.value) { toast('请先生成同步码'); return; }
   const text = ta.value;
-  // 直接用 textarea 全选 + execCommand，iOS PWA 下最可靠
   ta.removeAttribute('readonly');
   ta.style.userSelect = 'text';
   ta.style.webkitUserSelect = 'text';
@@ -1736,16 +1950,39 @@ function copySyncCode() {
   }
 }
 
-/* 分享同步码：走系统分享面板，绕过剪贴板限制 */
+/* 分享同步码：优先二维码图片，失败回退文本分享 */
 function shareSyncCode() {
   const ta = document.getElementById('syncCodeText');
+  const qrImg = document.getElementById('syncQrImg');
   if (!ta || !ta.value) { toast('请先生成同步码'); return; }
   const text = ta.value;
+  // 如果二维码已生成且长度合适，优先分享图片
+  if (qrImg && qrImg.src && text.length <= 2900) {
+    if (navigator.share && navigator.canShare) {
+      // 把 data URL 转 Blob 再分享
+      fetch(qrImg.src).then(r => r.blob()).then(blob => {
+        const file = new File([blob], '人情账本同步码.svg', { type: 'image/svg+xml' });
+        if (navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file], title: '人情账本同步码' })
+            .catch(() => shareText(text));
+        } else {
+          shareText(text);
+        }
+      }).catch(() => shareText(text));
+    } else {
+      // 浏览器不支持系统分享，提示长按图片
+      toast('请长按二维码图片分享/保存 ✓');
+    }
+  } else {
+    shareText(text);
+  }
+}
+
+function shareText(text) {
   if (navigator.share) {
-    navigator.share({ title: '人情账本同步码', text: text })
+    navigator.share({ title: '人情账本同步码', text })
       .catch(() => toast('已取消分享'));
   } else {
-    // 不支持系统分享，回退到复制
     copySyncCode();
   }
 }
@@ -1758,11 +1995,9 @@ function importSyncCode() {
   try {
     const prefix = 'RQSYNC:';
     let code = input;
-    // 兼容用户多次粘贴导致的前缀拼接：取最后一个 RQSYNC: 之后内容
     const lastIdx = code.lastIndexOf(prefix);
     if (lastIdx >= 0) code = code.substring(lastIdx + prefix.length);
     code = code.trim();
-    // 去掉可能混入的空白和换行，Base64 不含空白
     code = code.replace(/\s+/g, '');
 
     const json = decodeURIComponent(escape(atob(code)));
@@ -1823,6 +2058,12 @@ function importSyncCode() {
       DB.family = { ...data.family };
     }
 
+    // 增量同步成功：把 baseTime 记录为下次增量同步起点
+    if (data.mode === 'incremental' && data.baseTime) {
+      if (!DB.syncMeta) DB.syncMeta = { lastIncrementalSyncTime: 0 };
+      DB.syncMeta.lastIncrementalSyncTime = data.baseTime;
+    }
+
     saveData();
     initPersonSelect();
     renderHome();
@@ -1832,16 +2073,17 @@ function importSyncCode() {
 
     resultDiv.style.display = '';
     const hasUpd = updPersons > 0 || updRecords > 0;
+    const modeNote = data.mode === 'incremental' ? '<br><small>（增量模式，下次同步只导自此之后变更）</small>' : '';
     resultDiv.innerHTML = `
       <div class="batch-tips" style="background:var(--green-bg);">
         ✅ 导入完成！<br>
         新增 ${newPersons} 位人员，${newRecords} 笔记录。<br>
         ${hasUpd ? `更新 ${updPersons} 位人员、${updRecords} 笔记录（以较新版本为准）。` : ''}
         ${newPersons === 0 && newRecords === 0 && !hasUpd ? '（数据已是最新，无变化）' : ''}
+        ${modeNote}
       </div>
     `;
     toast(`导入成功：新增 ${newPersons} 人 / ${newRecords} 笔，更新 ${updPersons} 人 / ${updRecords} 笔 ✓`);
-    // 清空输入框，避免重复导入
     document.getElementById('importSyncCodeInput').value = '';
   } catch(e) {
     console.error(e);
@@ -1996,109 +2238,245 @@ function exportPersonTemplate() {
 
 // ====== 导出礼金往来模板 ======
 function exportRecordTemplate() {
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([
-    ['日期', '姓名', '事件类型', '收支', '金额', '实物礼品', '宴席地点', '备注']
-  ]);
-  // 设置日期列格式为 Excel 日期序列号
-  const sampleDates = ['2025-01-15', '2025-01-15', '2025-02-01'];
+  const header = ['日期', '姓名', '事件类型', '收支', '金额', '实物礼品', '宴席地点', '备注'];
   const sampleData = [
     ['2025-01-15', '张三', '结婚', '我收到', 500, '中华烟一条', 'XX大酒店', '红包+礼品'],
     ['2025-01-15', '李四', '结婚', '我收到', 300, '', 'XX大酒店', ''],
     ['2025-02-01', '王五', '满月', '我送出', 600, '水果礼盒', '', '同事孩子满月']
   ];
-  sampleData.forEach((row, ri) => {
-    const excelRow = ri + 1;
-    // 日期单元格：转为 Excel 序列号并设置日期格式
+  const aoa = [header];
+  sampleData.forEach(row => {
     const dateParts = row[0].split('-');
     const jsDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
     const excelSerial = Math.round((jsDate.getTime() / 86400000) + 25569);
-    ws[XLSX.utils.encode_cell({ r: excelRow, c: 0 })] = {
-      t: 'n', v: excelSerial, z: 'yyyy-mm-dd'
-    };
-    // 其他列正常写入
-    for (let ci = 1; ci < row.length; ci++) {
-      ws[XLSX.utils.encode_cell({ r: excelRow, c: ci })] = {
-        t: typeof row[ci] === 'number' ? 'n' : 's',
-        v: row[ci]
-      };
-    }
+    aoa.push([excelSerial, ...row.slice(1)]);
   });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // 日期列沿用 Excel 日期格式
+  for (let r = 1; r < aoa.length; r++) {
+    const addr = XLSX.utils.encode_cell({ r, c: 0 });
+    if (ws[addr]) ws[addr].z = 'yyyy-mm-dd';
+  }
   ws['!cols'] = [{wch:12},{wch:10},{wch:10},{wch:8},{wch:8},{wch:14},{wch:14},{wch:16}];
+  // 显式设定数据范围，否则示例行不会被写入
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } });
+  const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '礼金往来模板');
   XLSX.writeFile(wb, '礼金往来模板.xlsx');
   toast('礼金往来模板已下载 ✓');
 }
 
-// ====== 导入通讯录Excel ======
+// ====== 导入通讯录Excel（完善人员信息） ======
 function importPersonTemplate(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
+    const box = document.getElementById('importPersonResult');
     try {
       const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, { type: 'array' });
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      if (rows.length === 0) { toast('模板中没有数据'); event.target.value = ''; return; }
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+      if (rows.length === 0) { toast('表格中没有数据'); event.target.value = ''; return; }
 
-      const validRels = ['亲戚','朋友','同事','邻居','长辈'];
-      const existingNames = DB.persons.map(p => p.name);
-      let added = 0, skipped = 0;
+      // 表头校验：姓名是必要列
+      const firstRow = rows[0];
+      const missing = [];
+      if (!pickField(firstRow, '姓名')) missing.push('姓名');
+      if (missing.length > 0) {
+        if (box) {
+          box.innerHTML = `<div class="batch-tips" style="background:var(--primary-bg); margin-top:12px; line-height:1.7;">
+            ❌ 表头缺少必要列：<b>${missing.join('、')}</b><br>
+            通讯录模板第一行应为：<b>姓名 | 关系 | 手机号 | 生日 | 历法 | 备注</b><br>
+            实际检测到的表头：${Object.keys(firstRow).join(' | ') || '（空）'}
+          </div>`;
+          box.style.display = '';
+        }
+        toast('表头格式不对，请看页面提示');
+        event.target.value = '';
+        return;
+      }
 
-      rows.forEach(row => {
-        const name = (row['姓名'] || '').toString().trim();
-        if (!name) { skipped++; return; }
-        if (existingNames.includes(name)) { skipped++; return; }
-        let relation = (row['关系'] || '朋友').toString().trim();
-        if (!validRels.includes(relation)) relation = '朋友';
+      let added = 0, updated = 0, unchanged = 0;
+      const errLines = [];
+
+      rows.forEach((row, idx) => {
+        const rowNum = idx + 2;
+        const rawName = pickField(row, '姓名');
+        const name = (rawName || '').toString().trim();
+        if (!name) { errLines.push(`第 ${rowNum} 行：姓名为空`); return; }
+
+        // 关系：保留用户填写的原始值（去掉空白），空则默认"朋友"
+        let relation = (pickField(row, '关系') || '').toString().replace(/\s+/g, '').trim();
+        if (!relation) relation = '朋友';
+
         // 历法
-        const rawCal = (row['历法'] || '').toString().trim();
-        const calType = (rawCal.includes('农') || rawCal.toLowerCase().includes('lunar')) ? 'lunar' : 'solar';
+        const rawCal = (pickField(row, '历法') || '').toString().trim();
+        const calType = (rawCal.includes('农') || /lunar/i.test(rawCal)) ? 'lunar' : 'solar';
+
+        const phone = (pickField(row, '手机号') || pickField(row, '电话') || pickField(row, '手机') || '').toString().trim();
+        const note = (pickField(row, '备注') || '').toString().trim();
+        const rawBirth = pickField(row, '生日');
+
+        // 生日解析：农历存 月-日，公历存 YYYY-MM-DD
         let birthday = '';
-        const rawBirth = row['生日'];
-        if (rawBirth) {
+        if (rawBirth !== '' && rawBirth !== undefined && rawBirth !== null) {
           if (calType === 'lunar') {
-            // 农历：提取 M-D
-            const m = rawBirth.toString().match(/(\d{1,2})-(\d{1,2})/);
+            const m = rawBirth.toString().match(/(\d{1,2})\s*[-\/月]\s*(\d{1,2})/);
             if (m) birthday = parseInt(m[1]) + '-' + parseInt(m[2]);
-            else { skipped++; return; }
-          } else if (typeof rawBirth === 'number') {
-            const d = new Date((rawBirth - 25569) * 86400 * 1000);
-            if (!isNaN(d)) birthday = d.toISOString().slice(0, 10);
+            else errLines.push(`第 ${rowNum} 行「${name}」：农历生日格式应为 月-日（如 8-15）`);
           } else {
-            const d = new Date(rawBirth);
-            if (!isNaN(d)) birthday = d.toISOString().slice(0, 10);
+            birthday = parseExcelDate(rawBirth);
+            if (!birthday) errLines.push(`第 ${rowNum} 行「${name}」：生日无法解析（${rawBirth}）`);
           }
         }
-        DB.persons.push({
-          id: uuid(),
-          name,
-          relation,
-          phone: (row['手机号'] || '').toString().trim(),
-          birthday,
-          calType,
-          note: (row['备注'] || '').toString().trim(),
-          createTime: Date.now()
-        });
-        existingNames.push(name);
-        added++;
+
+        // 姓名标准化匹配（去空格、统一括号）
+        const nk = normName(name);
+        const exist = DB.persons.find(p => normName(p.name) === nk);
+
+        if (exist) {
+          // 已存在：用表中非空字段"完善"（空字段保留原值）
+          let changed = false;
+          if (relation && exist.relation !== relation) { exist.relation = relation; changed = true; }
+          if (phone && exist.phone !== phone) { exist.phone = phone; changed = true; }
+          if (note && exist.note !== note) { exist.note = note; changed = true; }
+          if (birthday && exist.birthday !== birthday) { exist.birthday = birthday; changed = true; }
+          if (birthday && exist.calType !== calType) { exist.calType = calType; changed = true; }
+          if (changed) { exist.updateTime = Date.now(); updated++; }
+          else unchanged++;
+        } else {
+          DB.persons.push({
+            id: uuid(),
+            name,
+            relation,
+            phone,
+            birthday,
+            calType,
+            note,
+            createTime: Date.now()
+          });
+          added++;
+        }
       });
+
+      // 新人员建好后再跑一次关联自愈，避免往来显示为 0
+      const fixed = repairRecordPersonIds();
 
       saveData();
       initPersonSelect();
       renderContacts();
       renderHome();
       renderMine();
-      toast(`导入 ${added} 人${skipped > 0 ? `，跳过 ${skipped}` : ''} ✓`);
+
+      const hasErr = errLines.length > 0;
+      if (box) {
+        let html = hasErr
+          ? `⚠️ 新增 ${added} 人，完善 ${updated} 人，无变化 ${unchanged} 人`
+          : `✅ 导入完成：新增 ${added} 人${updated > 0 ? `，完善 ${updated} 人信息` : ''}${unchanged > 0 ? `，无变化 ${unchanged} 人` : ''}`;
+
+        html += `。（导入后自动修复往来关联 ${fixed} 笔）`;
+        if (errLines.length > 0) {
+          html += `<br>${errLines.length} 行提示：<br>${errLines.slice(0, 15).join('<br>')}${errLines.length > 15 ? `<br>...还有 ${errLines.length - 15} 行` : ''}`;
+        }
+        box.innerHTML = `<div class="batch-tips" style="background:${hasErr ? 'var(--primary-bg)' : 'var(--green-bg)'}; margin-top:12px; max-height:220px; overflow-y:auto; font-size:0.75rem; line-height:1.7;">${html}</div>`;
+        box.style.display = '';
+      }
+      toast(`导入完成：新增 ${added} 人，完善 ${updated} 人 ✓`);
     } catch(err) {
       console.error(err);
-      toast('导入失败，请检查文件格式');
+      if (box) {
+        box.innerHTML = `<div class="batch-tips" style="background:var(--primary-bg); margin-top:12px;">❌ 导入异常：${esc(err.message || '文件格式不支持')}<br>请确认文件为 .xlsx 或 .xls 格式，且第一行是表头。</div>`;
+        box.style.display = '';
+      }
+      toast('导入失败，请看页面提示');
     }
     event.target.value = '';
   };
   reader.readAsArrayBuffer(file);
+}
+
+/* 新版 importRecordTemplate：表头别名容错 + 姓名标准化匹配 + 公共日期解析 */
+
+/* 表头别名映射：把用户表格里的各种写法归一到标准列名 */
+const HEADER_ALIASES = {
+  '日期': ['日期', '发生日期', '时间', 'date', 'Date'],
+  '姓名': ['姓名', '名字', '人员', '对方', 'name', 'Name'],
+  '事件类型': ['事件类型', '事件', '类型', '事项', 'eventType'],
+  '收支': ['收支', '收/支', '收付', '方向', '类型2', 'type'],
+  '金额': ['金额', '礼金', '礼金金额', '钱数', 'amount', 'Amount'],
+  '实物礼品': ['实物礼品', '礼品', '实物', '礼物', 'gift'],
+  '宴席地点': ['宴席地点', '地点', '酒店', '场所', 'location'],
+  '备注': ['备注', '说明', '注释', 'remark', 'note'],
+  // 通讯录相关
+  '关系': ['关系', '称谓', '与我的关系', 'relation'],
+  '手机号': ['手机号', '电话', '手机', '联系方式', 'phone'],
+  '生日': ['生日', '出生日期', '出生年月', 'birthday'],
+  '历法': ['历法', '日历', '阴阳历', 'calendar']
+};
+
+/* 从一行对象里按别名取字段值 */
+function pickField(row, stdKey) {
+  const aliases = HEADER_ALIASES[stdKey] || [stdKey];
+  for (const a of aliases) {
+    if (row[a] !== undefined && row[a] !== null && row[a] !== '') return row[a];
+  }
+  // 兜底：忽略大小写和空格再试一次
+  const keys = Object.keys(row);
+  for (const a of aliases) {
+    const na = a.replace(/\s+/g, '').toLowerCase();
+    const hit = keys.find(k => k.replace(/\s+/g, '').toLowerCase() === na);
+    if (hit && row[hit] !== '' && row[hit] !== undefined && row[hit] !== null) return row[hit];
+  }
+  return '';
+}
+
+/* 通用日期解析函数（礼金/通讯录导入共用） */
+function parseExcelDate(rawDate) {
+  if (rawDate === '' || rawDate === undefined || rawDate === null) return '';
+  try {
+    if (rawDate instanceof Date && !isNaN(rawDate)) {
+      const d = rawDate;
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    if (typeof rawDate === 'number') {
+      const d = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
+      if (isNaN(d)) return '';
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    const s = rawDate.toString().trim();
+    if (!s) return '';
+    let m;
+    // 中文：2025年1月15日
+    if ((m = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日?/))) {
+      return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+    }
+    // 2025-1-15 / 2025/1/15 / 2025.1.15
+    if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) {
+      return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+    }
+    // 1/15/25 / 1-15-2025（美式 M/D/Y）
+    if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/))) {
+      let y = parseInt(m[3]);
+      if (y < 100) y += y < 50 ? 2000 : 1900;
+      return `${y}-${String(m[1]).padStart(2,'0')}-${String(m[2]).padStart(2,'0')}`;
+    }
+    // 日期对象字符串 2025-01-15T00:00:00
+    const d = new Date(s);
+    if (!isNaN(d)) {
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+  } catch(err) {}
+  return '';
+}
+
+/* 收支方向解析 */
+function parseDirection(raw) {
+  const s = (raw || '').toString().trim();
+  if (s.includes('送') || s.includes('出') || s.includes('支') || /out/i.test(s)) return 'out';
+  if (s.includes('收') || s.includes('入') || /in/i.test(s)) return 'in';
+  return 'in';
 }
 
 // ====== 导入礼金往来Excel ======
@@ -2109,58 +2487,86 @@ function importRecordTemplate(event) {
   reader.onload = (e) => {
     try {
       const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, { type: 'array', cellDates: false });
+      const wb = XLSX.read(data, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
-      if (rows.length === 0) { toast('模板中没有数据'); event.target.value = ''; return; }
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+      if (rows.length === 0) { toast('表格中没有数据'); event.target.value = ''; return; }
+
+      // 校验表头是否含必要列
+      const firstRow = rows[0];
+      const missing = [];
+      if (!pickField(firstRow, '姓名')) missing.push('姓名');
+      if (!pickField(firstRow, '金额')) missing.push('金额');
+      if (missing.length > 0) {
+        const tip = document.createElement('div');
+        tip.className = 'batch-tips';
+        tip.style.background = 'var(--primary-bg)';
+        tip.style.marginTop = '12px';
+        tip.innerHTML = `❌ 表头缺少必要列：<b>${missing.join('、')}</b><br>请确保表格第一行包含：日期、姓名、事件类型、收支、金额、实物礼品、宴席地点、备注<br>实际检测到的表头：${Object.keys(firstRow).join(' | ')}`;
+        const box = document.getElementById('importRecordResult');
+        if (box) { box.innerHTML = ''; box.appendChild(tip); box.style.display = ''; }
+        toast('表头格式不对，请看页面提示');
+        event.target.value = '';
+        return;
+      }
 
       const validEvents = EVENT_TYPES.map(e => e.key);
-      let added = 0, newPersons = 0, errors = 0;
+      let added = 0, newPersons = 0, updated = 0;
+      const errLines = [];
 
-      rows.forEach(row => {
-        const name = (row['姓名'] || '').toString().trim();
-        const amountStr = row['金额'];
-        const amount = parseFloat(amountStr);
-        if (!name || !amount || amount <= 0) { errors++; return; }
+      rows.forEach((row, idx) => {
+        const rowNum = idx + 2;
+        const rawName = pickField(row, '姓名');
+        const name = (rawName || '').toString().trim();
+        if (!name) { errLines.push(`第 ${rowNum} 行：姓名为空`); return; }
 
-        const rawDate = row['日期'];
-        let date = '';
-        if (typeof rawDate === 'number') {
-          // Excel 日期序列号
-          const d = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
-          if (!isNaN(d)) date = d.toISOString().slice(0, 10);
-        } else if (rawDate instanceof Date) {
-          date = rawDate.toISOString().slice(0, 10);
-        } else {
-          const dateStr = (rawDate || '').toString().trim();
-          // 尝试 YYYY-MM-DD 或 YYYY/MM/DD 格式
-          const m = dateStr.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
-          if (m) {
-            date = `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
-          } else {
-            const d = new Date(dateStr);
-            if (!isNaN(d)) date = d.toISOString().slice(0, 10);
-            else date = new Date().toISOString().slice(0, 10);
-          }
+        const amountRaw = pickField(row, '金额');
+        const amount = parseFloat(String(amountRaw).replace(/[,，¥￥\s]/g, ''));
+        if (!amount || amount <= 0 || isNaN(amount)) { errLines.push(`第 ${rowNum} 行「${name}」：金额无效（${amountRaw}）`); return; }
+
+        const rawDate = pickField(row, '日期');
+        let date = parseExcelDate(rawDate);
+        if (!date) {
+          // 日期缺失时用今天兜底，但记录到提示里
+          date = todayStr();
+          errLines.push(`第 ${rowNum} 行「${name}」：日期无法解析（${rawDate}），已按今天导入`);
         }
 
-        let eventType = (row['事件类型'] || '其他').toString().trim();
-        if (!validEvents.includes(eventType)) eventType = '其他';
+        let eventType = (pickField(row, '事件类型') || '其他').toString().trim();
+        if (!validEvents.includes(eventType)) {
+          // 尝试模糊匹配（如"婚宴"→"结婚"）
+          const fuzzy = validEvents.find(e => eventType.includes(e) || e.includes(eventType));
+          eventType = fuzzy || '其他';
+        }
 
-        const收支 = (row['收支'] || '我收到').toString().trim();
-        const type = (收支.includes('送') || 收支.includes('出')) ? 'out' : 'in';
+        const type = parseDirection(pickField(row, '收支'));
 
-        // 查找或创建人员
-        let person = DB.persons.find(p => p.name === name);
+        const gift = (pickField(row, '实物礼品') || '').toString().trim();
+        const location = (pickField(row, '宴席地点') || '').toString().trim();
+        const remark = (pickField(row, '备注') || '').toString().trim();
+
+        // 查找或创建人员：姓名标准化匹配（去空格、统一括号）
+        const nk = normName(name);
+        let person = DB.persons.find(p => normName(p.name) === nk);
         if (!person) {
-          person = { id: uuid(), name, relation: '朋友', phone: '', birthday: '', note: '', createTime: Date.now() };
+          person = {
+            id: uuid(), name, relation: '朋友', phone: '', birthday: '',
+            calType: 'solar', note: '礼金导入时自动创建', createTime: Date.now()
+          };
           DB.persons.push(person);
           newPersons++;
+        } else if (person.name !== name) {
+          // 用表格里的写法更新显示名（保持 personId 不变）
+          person.name = name;
+          updated++;
         }
 
-        const gift = (row['实物礼品'] || '').toString().trim();
-        const location = (row['宴席地点'] || '').toString().trim();
-        const remark = (row['备注'] || '').toString().trim();
+        // 去重：同人+同日期+同金额+同事件 认为重复，跳过
+        const dup = DB.records.find(r =>
+          r.personId === person.id && r.date === date &&
+          Math.abs(Number(r.amount) - amount) < 0.01 && r.eventType === eventType
+        );
+        if (dup) { errLines.push(`第 ${rowNum} 行「${name}」：疑似重复（${date} ¥${amount} ${eventType}），已跳过`); return; }
 
         DB.records.push({
           id: uuid(),
@@ -2178,15 +2584,48 @@ function importRecordTemplate(event) {
         added++;
       });
 
+      // 导入后做一次关联自愈
+      repairRecordPersonIds();
+
       saveData();
       initPersonSelect();
       renderHome();
       renderContacts();
       renderMine();
-      toast(`导入 ${added} 笔记录${newPersons > 0 ? `，新增 ${newPersons} 人` : ''}${errors > 0 ? `，跳过 ${errors} 行` : ''} ✓`);
+
+      const realErrors = errLines.filter(l => !l.includes('已按今天导入'));
+      const dupWarns = errLines.filter(l => l.includes('疑似重复'));
+      const box = document.getElementById('importRecordResult');
+      if (box) {
+        const tip = document.createElement('div');
+        tip.className = 'batch-tips';
+        const isOk = realErrors.length === 0;
+        tip.style.background = isOk ? 'var(--green-bg)' : 'var(--primary-bg)';
+        tip.style.marginTop = '12px';
+        tip.style.maxHeight = '260px';
+        tip.style.overflowY = 'auto';
+        tip.style.fontSize = '0.75rem';
+        tip.style.lineHeight = '1.7';
+        let html = `✅ 成功导入 <b>${added}</b> 笔${newPersons > 0 ? `，新增 ${newPersons} 人` : ''}${updated > 0 ? `，更新 ${updated} 人姓名` : ''}。`;
+        if (dupWarns.length > 0) html += `<br>↩️ 跳过重复 ${dupWarns.length} 笔`;
+        if (errLines.length > 0) {
+          html += `<br><br>📋 明细（${errLines.length} 条）：<br>${errLines.slice(0, 15).join('<br>')}${errLines.length > 15 ? `<br>...还有 ${errLines.length - 15} 条（详见控制台）` : ''}`;
+          console.log('导入明细：', errLines);
+        }
+        tip.innerHTML = html;
+        box.innerHTML = '';
+        box.appendChild(tip);
+        box.style.display = '';
+      }
+      toast(`导入完成：成功 ${added} 笔${dupWarns.length > 0 ? `，跳过重复 ${dupWarns.length}` : ''}`);
     } catch(err) {
       console.error(err);
-      toast('导入失败，请检查文件格式');
+      const box = document.getElementById('importRecordResult');
+      if (box) {
+        box.innerHTML = `<div class="batch-tips" style="background:var(--primary-bg); margin-top:10px;">❌ 导入异常：${esc(err.message || '文件格式不支持')}<br>请确认文件为 .xlsx 或 .xls 格式，且第一行是表头。</div>`;
+        box.style.display = '';
+      }
+      toast('导入失败，请看页面提示');
     }
     event.target.value = '';
   };
